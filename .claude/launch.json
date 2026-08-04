@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "pdf-clasificar-dev",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev", "--", "--port", "3010"],
+      "port": 3010
+    },
+    {
+      "name": "pdf-clasificar-dist-estatico",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "http.server", "3011", "--directory", "dist"],
+      "port": 3011
+    }
+  ]
+}

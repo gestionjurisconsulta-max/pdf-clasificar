@@ -1,0 +1,5 @@
+{
+  "name": "PdfClasificar",
+  "description": "Multi-stage invoice processor with local OCR, Gemini AI, manual grouping, and rotation features.",
+  "requestFramePermissions": []
+}
