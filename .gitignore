@@ -7,19 +7,39 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
-.claude/*
-node_modules
-dist
-dist-ssr
+# Dependencies
+node_modules/
+
+# Production & Build outputs
+dist/
+dist-ssr/
+build/
 *.local
 
-# Editor directories and files
+# Environment variables & secrets
+.env
+.env.*
+!.env.example
+
+# Editor & OS files
 .vscode/*
 !.vscode/extensions.json
-.idea
+.idea/
 .DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
 *.suo
 *.ntvs*
 *.njsproj
 *.sln
 *.sw?
+
+# Caches & temporary folders
+.cache/
+.gemini/
+.claude/
+
+# Local test binary files
+debug-real.pdf
+
