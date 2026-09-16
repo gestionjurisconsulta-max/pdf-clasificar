@@ -7,6 +7,7 @@ import { analyzeInvoicePage } from './services/geminiService';
 import { canonicalForm, findMatchingCompany } from './services/matchingService';
 import { sanitizeName } from './services/fileNameService';
 import { DEFAULT_CIF_REGEX, DEFAULT_INVOICE_REGEX, extractInvoiceNumber } from './services/invoiceNumberService';
+import { groupByContinuation } from './services/continuationService';
 import { Company, InvoicePageData, ProcessedInvoice, ProcessingStep, LearningData } from './types';
 import JSZip from 'jszip';
 
@@ -67,6 +68,9 @@ const App: React.FC = () => {
   const [step, setStep] = useState<ProcessingStep>(ProcessingStep.IDLE);
   const [pages, setPages] = useState<(InvoicePageData & { thumb: string; index: number })[]>([]);
   const [useAI, setUseAI] = useState(false);
+  // Une automáticamente las hojas que no son una factura por sí solas.
+  // Sólo aplica al motor local: es el único que dispone del texto.
+  const [autoContinuation, setAutoContinuation] = useState(true);
   const [logs, setLogs] = useState<string[]>([]);
   const [detailedLogs, setDetailedLogs] = useState<string[]>([]);
   const [progress, setProgress] = useState({ current: 0, total: 0 });
@@ -337,7 +341,57 @@ const App: React.FC = () => {
         if (group.length) { batches.push(group); group.forEach(p => processedIndices.add(p.index)); }
       });
 
+      // Lo que el usuario no ha agrupado a mano. El texto de estas páginas se
+      // lee UNA vez y se reutiliza después para el análisis, así que detectar
+      // continuaciones no cuesta ninguna extracción extra.
+      const sueltas = pages.filter(p => !processedIndices.has(p.index)).sort((a, b) => a.index - b.index);
+      const textCache = new Map<number, string>();
+
+      if (!useAI && autoContinuation && sueltas.length > 0) {
+        addLog(`Leyendo el texto de ${sueltas.length} páginas para detectar facturas de varias hojas...`);
+        setProgress({ current: 0, total: sueltas.length });
+
+        for (let i = 0; i < sueltas.length; i++) {
+          if (stopProcessingRef.current) { cancelled = true; break; }
+          const page = sueltas[i];
+          try {
+            textCache.set(page.index, await extractTextLocally(pdfDoc, page.index));
+          } catch (e) {
+            addLog(`No se ha podido leer la página ${page.index + 1}: ${errorMessage(e)}`);
+          }
+          setProgress(p => ({ ...p, current: i + 1 }));
+        }
+      }
+
+      // Sólo se agrupan automáticamente las páginas cuyo texto se llegó a leer:
+      // si se canceló a mitad, o falló la lectura, cada página va por su cuenta
+      // en vez de arrastrarla a la factura anterior por error.
+      const legibles = sueltas.filter(p => textCache.has(p.index));
+      if (legibles.length > 0) {
+        const byIndex = new Map(sueltas.map(p => [p.index, p]));
+        const grupos = groupByContinuation(
+          legibles.map(p => ({ index: p.index, text: textCache.get(p.index) ?? '' })),
+          learning.patterns.invoiceRegex,
+          learning.patterns.cifRegex
+        );
+
+        let unidas = 0;
+        for (const grupo of grupos) {
+          batches.push(grupo.indices.map(idx => byIndex.get(idx)!));
+          grupo.indices.forEach(idx => processedIndices.add(idx));
+          grupo.notes.forEach(n => { addLog(`>>> ${n}`, true); unidas++; });
+        }
+
+        addLog(unidas > 0
+          ? `${unidas} página(s) unidas automáticamente a la factura anterior: ${grupos.length} facturas a partir de ${legibles.length} hojas.`
+          : `Ninguna página parece continuación: ${legibles.length} facturas de una hoja.`);
+      }
+
+      // El resto (modo IA, detección desactivada, o páginas que no se pudieron
+      // leer) mantiene el comportamiento de una factura por página.
       pages.filter(p => !processedIndices.has(p.index)).forEach(p => { batches.push([p]); processedIndices.add(p.index); });
+
+      batches.sort((a, b) => a[0].index - b[0].index);
 
       setProgress({ current: 0, total: batches.length });
       const results: ProcessedInvoice[] = [];
@@ -357,9 +411,11 @@ const App: React.FC = () => {
         let matchedCompany: Company | null = null;
         let invoiceNumber = "";
         let matchInfo = "BUSCANDO...";
+        let ambiguousInfo = "";
 
-        // Log inicial temporal
-        addLog(`Analizando Bloque ${i + 1}/${batches.length} (Pág: ${firstPage.index + 1})... ${matchInfo}`);
+        // Log inicial temporal. Un bloque puede ser ya varias hojas.
+        const hojas = batch.length > 1 ? `Págs: ${batch.map(p => p.index + 1).join('+')}` : `Pág: ${firstPage.index + 1}`;
+        addLog(`Analizando Bloque ${i + 1}/${batches.length} (${hojas})... ${matchInfo}`);
 
         try {
           if (useAI) {
@@ -371,13 +427,15 @@ const App: React.FC = () => {
             invoiceNumber = aiData.invoiceNumber;
             addLog(`>>> AI Detectó CIF: ${aiData.cif} | Factura: ${aiData.invoiceNumber}`, true);
           } else {
-            const text = await extractTextLocally(pdfDoc, firstPage.index);
+            // Si ya se leyó al detectar continuaciones, no se vuelve a extraer.
+            const text = textCache.get(firstPage.index) ?? await extractTextLocally(pdfDoc, firstPage.index);
 
             addLog(`TEXTO EXTRAÍDO PÁG ${firstPage.index + 1}:`, true);
             addLog(text.substring(0, 500) + "...", true);
 
             const { company, ambiguous, candidates } = findMatchingCompany(text, companies, learning.cifMappings);
             if (ambiguous) {
+              ambiguousInfo = `AMBIGUO: ${candidates.map(c => c.name).join(' / ')}`;
               addLog(`>>> AMBIGUO: coinciden varias empresas (${candidates.map(c => c.name).join(', ')}). Se deja como pendiente.`, true);
             } else if (company) {
               addLog(`>>> MATCH ENCONTRADO: ${company.name} (CIF: ${company.cif})`, true);
@@ -391,8 +449,14 @@ const App: React.FC = () => {
         const companyName = matchedCompany ? matchedCompany.name : PENDING_FOLDER;
         const finalInvNum = firstPage.manualReference?.trim() || invoiceNumber || "S-N";
 
-        // Actualizar el log principal con el resultado
-        matchInfo = matchedCompany ? `MATCH ENCONTRADO: ${matchedCompany.name} (CIF: ${matchedCompany.cif})` : "SIN COINCIDENCIA (Pendiente)";
+        // Actualizar el log principal con el resultado. La ambigüedad se
+        // distingue del "no hay nada": no es lo mismo revisar una factura sin
+        // CIF que una con dos clientes conocidos compitiendo.
+        matchInfo = matchedCompany
+          ? `MATCH ENCONTRADO: ${matchedCompany.name} (CIF: ${matchedCompany.cif})`
+          : ambiguousInfo
+            ? `${ambiguousInfo} (Pendiente)`
+            : "SIN COINCIDENCIA (Pendiente)";
         setLogs(prev => {
           const last = prev[prev.length - 1];
           if (last && last.includes(`Bloque ${i + 1}/`)) {
@@ -775,6 +839,25 @@ const App: React.FC = () => {
                     Modo IA activo: la imagen de cada página se envía a la API de Google Gemini para su análisis.
                   </p>
                 )}
+              </div>
+
+              <div className="space-y-3">
+                <h3 className="text-[9px] font-black text-slate-400 uppercase tracking-widest px-1">Facturas de varias hojas</h3>
+                <button
+                  onClick={() => setAutoContinuation(v => !v)}
+                  disabled={useAI}
+                  className={`w-full p-4 rounded-2xl border-2 flex items-center gap-3 text-left transition-all disabled:opacity-30 ${autoContinuation && !useAI ? 'bg-green-50 border-green-200 text-green-700' : 'bg-white border-slate-100 text-slate-400'}`}
+                >
+                  <i className={`fas ${autoContinuation && !useAI ? 'fa-toggle-on text-green-600' : 'fa-toggle-off'} text-lg`}></i>
+                  <span className="text-[9px] font-black uppercase leading-tight">
+                    {autoContinuation ? 'Unir continuaciones automáticamente' : 'Una factura por hoja'}
+                  </span>
+                </button>
+                <p className="text-[8px] font-bold text-slate-300 leading-relaxed px-1">
+                  {useAI
+                    ? 'No disponible con el motor AI GEMINI: la detección usa el texto que extrae el motor local.'
+                    : 'Une a la factura anterior las hojas que no traen ni número de factura ni un CIF nuevo. El log detallado explica cada unión.'}
+                </p>
               </div>
 
               <div className="space-y-3">

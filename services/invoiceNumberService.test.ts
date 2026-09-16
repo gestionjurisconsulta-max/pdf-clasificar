@@ -52,3 +52,27 @@ describe('extractInvoiceNumber', () => {
     expect(() => new RegExp(DEFAULT_INVOICE_REGEX, 'i')).not.toThrow();
   });
 });
+
+describe('extractInvoiceNumber frente a importes', () => {
+  it.each([
+    ['TOTAL FACTURA 2.777,60', ''],
+    ['Base imponible FACTURA 1.200,00', ''],
+    ['Importe factura 450,00', ''],
+    ['TOTAL A PAGAR FACTURA 89,50', '']
+  ])('no confunde un importe con un número en %j', (text, expected) => {
+    expect(extractInvoiceNumber(text)).toBe(expected);
+  });
+
+  it('sigue encontrando el número aunque la página tenga también totales', () => {
+    const pagina = 'Factura Nº F-2026-0042 ... lineas ... TOTAL FACTURA 2.777,60';
+    expect(extractInvoiceNumber(pagina)).toBe('F-2026-0042');
+  });
+
+  it('acepta un número con puntos que no es un importe', () => {
+    expect(extractInvoiceNumber('Factura Nº 2.777')).toBe('2.777');
+  });
+
+  it('salta el importe y encuentra el número aunque vaya después', () => {
+    expect(extractInvoiceNumber('TOTAL FACTURA 2.777,60 — Factura Nº A-15')).toBe('A-15');
+  });
+});

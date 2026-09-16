@@ -16,9 +16,10 @@ analizada a la API de Google Gemini (la app pide confirmación antes).
 3. **Organizador** — puedes rotar, borrar y agrupar páginas. Dos páginas de la
    misma factura se unen seleccionándolas y pulsando *Unir*, o escribiendo el
    mismo ID manual en ambas.
-4. **División** — cada bloque se analiza para averiguar a qué cliente pertenece
-   y se exporta como PDF independiente, en una carpeta por cliente. Lo que no
-   se ha podido identificar va a *Pendiente de asignar*.
+4. **División** — con el motor local, primero se detectan las facturas de varias
+   hojas (ver abajo). Después cada bloque se analiza para averiguar a qué
+   cliente pertenece y se exporta como PDF independiente, en una carpeta por
+   cliente. Lo que no se ha podido identificar va a *Pendiente de asignar*.
 
 El resultado se descarga como ZIP o, en navegadores con File System Access API
 (Chrome y Edge), se escribe directamente en una carpeta local que elijas.
@@ -37,6 +38,29 @@ escaneada, le pasa OCR con Tesseract. Cuando un CIF encaja con más de un client
 la página se marca como ambigua y va a *Pendiente de asignar*, en vez de
 asignarla al primero que coincida.
 
+## Facturas de varias hojas
+
+Con el motor local, las hojas que no son una factura por sí solas se unen
+automáticamente a la anterior. Una hoja se considera continuación si:
+
+- dice explícitamente ser la página 2 o posterior (*"Página 2 de 3"*), o lleva
+  una frase de continuación; **o**
+- repite el mismo número de factura que la hoja anterior; **o**
+- no tiene número de factura propio y no aporta ningún CIF que no se hubiera
+  visto ya en esa factura; **o**
+- no tiene texto legible.
+
+Y nunca se une si dice ser la página 1, si trae otro número de factura, si
+aparece un CIF nuevo, o si no va **físicamente pegada** a la hoja anterior
+(borrar una página rompe la cadena a propósito).
+
+Cada unión queda justificada en el log detallado, con el motivo concreto. Si
+prefieres el comportamiento antiguo, el interruptor *Facturas de varias hojas*
+del panel lateral lo desactiva y vuelve a una factura por hoja.
+
+La agrupación manual (*Unir* o el ID manual) sigue teniendo prioridad: lo que
+tú agrupes no pasa por la detección automática.
+
 ### Limitaciones conocidas
 
 - **El modo IA sólo funciona en desarrollo.** El endpoint `/api/analyze-invoice`
@@ -45,8 +69,12 @@ asignarla al primero que coincida.
   estático sin ese endpoint. Para desplegarlo hace falta una función serverless.
 - **El modo IA busca el CIF del emisor**, pero la base de datos es de clientes
   receptores, así que en la mayoría de facturas no encontrará coincidencia.
-- **No hay agrupación automática de páginas de continuación.** Cada página es
-  una factura salvo que la agrupes a mano.
+- **En modo IA no hay detección de continuaciones**, porque se apoya en el texto
+  que extrae el motor local. Con IA, cada página es una factura salvo que la
+  agrupes a mano. El campo `isContinuation` que devuelve Gemini no se usa.
+- **Dos facturas seguidas del mismo cliente se separan por su número.** Si el
+  número no se llega a leer en la primera hoja de la segunda factura, podrían
+  unirse por error. El log detallado permite detectarlo.
 - **Tesseract descarga su motor de `cdn.jsdelivr.net`** la primera vez que hace
   falta OCR, así que esa parte no funciona sin conexión.
 

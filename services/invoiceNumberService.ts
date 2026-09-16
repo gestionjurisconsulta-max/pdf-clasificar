@@ -22,20 +22,35 @@ export const DEFAULT_CIF_REGEX =
  * Nunca lanza: un patrón inválido venido del JSON de memoria se trata como
  * "no encontrado" en vez de reventar el proceso a mitad de camino.
  */
+// "TOTAL FACTURA 2.777,60" no es un número de factura. Estas dos comprobaciones
+// descartan los importes, que aparecen sobre todo en las páginas de cierre y
+// contaminaban el nombre de los PDF exportados.
+const AMOUNT_CONTEXT = /(total|base|importe|subtotal|suma|iva|irpf|descuento|a pagar)[^a-z0-9]{0,15}$/i;
+const LOOKS_LIKE_DECIMALS = /^,\d/;
+
 export const extractInvoiceNumber = (text: string, pattern: string = DEFAULT_INVOICE_REGEX): string => {
   let regex: RegExp;
   try {
-    regex = new RegExp(pattern, 'i');
+    regex = new RegExp(pattern, 'gi');
   } catch {
     return '';
   }
 
-  const match = text.match(regex);
-  if (!match) return '';
+  for (const match of text.matchAll(regex)) {
+    // Se prefiere el grupo de captura; si el patrón del usuario no tiene
+    // ninguno, se usa la coincidencia completa.
+    // Los puntos y guiones finales suelen ser el punto de la frase.
+    const raw = ((match[1] ?? match[0]) ?? '').replace(/[.\-/]+$/, '').trim();
+    if (!raw) continue;
 
-  // Se prefiere el grupo de captura; si el patrón del usuario no tiene ninguno,
-  // se usa la coincidencia completa.
-  const raw = (match[1] ?? match[0]) ?? '';
-  // Los puntos y guiones finales suelen ser el punto de la frase, no del número.
-  return raw.replace(/[.\-/]+$/, '').trim();
+    const start = match.index ?? 0;
+    const end = start + match[0].length;
+
+    if (LOOKS_LIKE_DECIMALS.test(text.slice(end, end + 3))) continue;
+    if (AMOUNT_CONTEXT.test(text.slice(Math.max(0, start - 20), start))) continue;
+
+    return raw;
+  }
+
+  return '';
 };
