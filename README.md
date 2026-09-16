@@ -1,10 +1,30 @@
 # PdfClasificar
 
-Trocea un PDF con muchas facturas y reparte cada una en la carpeta de su cliente.
+Trocea PDF con muchas facturas y albaranes y reparte cada documento en la
+carpeta de su cliente.
 
-Todo el procesamiento ocurre en el navegador: el PDF nunca sale del equipo salvo
-que se active expresamente el motor de IA, que envía la imagen de cada página
-analizada a la API de Google Gemini (la app pide confirmación antes).
+El proyecto tiene dos piezas:
+
+- **La aplicación web** (React + TypeScript), que procesa un PDF entero en el
+  navegador. El fichero nunca sale del equipo salvo que se active expresamente
+  el motor de IA, que envía la imagen de cada página a la API de Google Gemini
+  (la app pide confirmación antes).
+- **La API** (Python + PostgreSQL, en contenedores), pensada para un VPS:
+  admite varios Excel de clientes y varios PDF a la vez, separa las facturas de
+  los albaranes y guarda el histórico. Ver [docs/arquitectura.md](docs/arquitectura.md).
+
+> La interfaz web todavía **no** habla con la API: hace su propio procesado en
+> el navegador, como siempre. Conectarlas es el paso siguiente.
+
+## Arrancar con Docker
+
+```bash
+cp .env.example .env    # y rellena POSTGRES_PASSWORD
+docker compose up -d --build
+```
+
+La aplicación queda en http://localhost:8080 y la API en
+http://localhost:8080/api (documentación interactiva en `/api/docs`).
 
 ## Cómo funciona
 
@@ -99,6 +119,32 @@ La app queda en http://localhost:3010.
 | `npm run lint` | ESLint |
 | `npm run typecheck` | TypeScript en modo estricto |
 | `npm run check` | Los tres anteriores |
+
+### El backend
+
+Requiere Python 3.11. Lo normal es trabajar con los contenedores, pero para
+iterar rápido sobre la lógica:
+
+```bash
+cd backend
+pip install -e ".[dev]"
+python -m pytest tests -q
+```
+
+Los tests de `backend/tests/` son los mismos casos que `services/*.test.ts`:
+si tocas la lógica en un lado, el otro tiene que seguir dando lo mismo.
+
+Para levantar sólo la base de datos y correr la API en local:
+
+```bash
+docker compose up -d db
+cd backend
+DATABASE_URL=postgresql+psycopg://pdfclasificar:TU_PASSWORD@localhost:5432/pdfclasificar   STORAGE_DIR=./.data alembic upgrade head
+uvicorn app.main:app --reload
+```
+
+(Para esto hace falta publicar el puerto de `db` en `docker-compose.yml`, que
+por seguridad viene sin publicar.)
 
 ### La API key
 

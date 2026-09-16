@@ -1,0 +1,10 @@
+__pycache__
+*.pyc
+*.pyo
+.pytest_cache
+.venv
+venv
+# Los tests no viajan a la imagen de producción: se montan al ejecutarlos.
+tests
+.env
+.env.*

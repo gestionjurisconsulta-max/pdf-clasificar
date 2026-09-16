@@ -1,0 +1,58 @@
+name: pdf-clasificar
+
+services:
+  db:
+    image: postgres:15-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-pdfclasificar}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?define POSTGRES_PASSWORD en .env}
+      POSTGRES_DB: ${POSTGRES_DB:-pdfclasificar}
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      # El backend espera a que esto pase: sin ello, la migración del arranque
+      # falla porque Postgres todavía no acepta conexiones.
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-pdfclasificar} -d ${POSTGRES_DB:-pdfclasificar}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    # Sin puertos publicados: sólo se llega a la base de datos desde la red
+    # interna de compose. Para depurar desde fuera, usa un túnel SSH al VPS.
+
+  backend:
+    build:
+      context: ./backend
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-pdfclasificar}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-pdfclasificar}
+      STORAGE_DIR: /data
+      OCR_LANGUAGE: ${OCR_LANGUAGE:-spa}
+      MAX_UPLOAD_BYTES: ${MAX_UPLOAD_BYTES:-209715200}
+    volumes:
+      - storage:/data
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/api/health', timeout=5).status==200 else 1)\""]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+
+  frontend:
+    build:
+      context: .
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      # En el VPS, pon delante un proxy con TLS (Caddy o Traefik) y deja este
+      # puerto sólo en la interfaz local: "127.0.0.1:8080:80".
+      - "${HTTP_PORT:-8080}:80"
+
+volumes:
+  db-data:
+  storage:

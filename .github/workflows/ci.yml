@@ -6,7 +6,7 @@ on:
   pull_request:
 
 jobs:
-  check:
+  frontend:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -34,3 +34,51 @@ jobs:
       # Las de desarrollo no llegan al navegador del usuario.
       - name: Audit (producción)
         run: npm audit --omit=dev --audit-level=high
+
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      # tesseract y poppler no hacen falta para los tests de dominio, pero sí
+      # para importar los módulos que los envuelven.
+      - name: Dependencias del sistema
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends poppler-utils tesseract-ocr tesseract-ocr-spa
+
+      - name: Instalar
+        working-directory: backend
+        run: pip install -e ".[dev]"
+
+      - name: Tests
+        working-directory: backend
+        run: python -m pytest tests -q
+
+  containers:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Comprueba que las tres imágenes construyen y que la pila arranca sana:
+      # el healthcheck del backend sólo pasa si además llega a Postgres y las
+      # migraciones se han aplicado.
+      - name: Levantar la pila
+        run: |
+          cp .env.example .env
+          sed -i 's/^POSTGRES_PASSWORD=$/POSTGRES_PASSWORD=ci-test-password/' .env
+          docker compose up -d --build --wait --wait-timeout 300
+
+      - name: Comprobar la API
+        run: curl --fail --silent --show-error http://localhost:8080/api/health
+
+      - name: Logs si algo falla
+        if: failure()
+        run: docker compose logs
+
+      - name: Parar
+        if: always()
+        run: docker compose down -v

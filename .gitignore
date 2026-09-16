@@ -50,3 +50,11 @@ dummy-non-existing-folder/
 
 # Ficheros de prueba locales
 test-fixture.*
+
+# Python (backend)
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+backend/.data/

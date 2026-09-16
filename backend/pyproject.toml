@@ -1,0 +1,38 @@
+[project]
+name = "pdf-clasificar-backend"
+version = "0.1.0"
+description = "API de clasificación de facturas y albaranes"
+requires-python = ">=3.11,<3.12"
+
+dependencies = [
+    "fastapi==0.115.6",
+    "uvicorn[standard]==0.34.0",
+    "python-multipart==0.0.20",
+    "pydantic==2.10.4",
+    "pydantic-settings==2.7.0",
+    "sqlalchemy==2.0.36",
+    "psycopg[binary]==3.2.3",
+    "alembic==1.14.0",
+    # Lectura de Excel: openpyxl para .xlsx/.xlsm, xlrd para los .xls antiguos
+    # que todavía exportan muchos programas de contabilidad.
+    "openpyxl==3.1.5",
+    "xlrd==2.0.1",
+    # PDF: pdfplumber extrae el texto, pypdf trocea y rota.
+    "pdfplumber==0.11.4",
+    "pypdf==5.1.0",
+    # OCR de páginas escaneadas. Necesitan tesseract-ocr y poppler-utils en la
+    # imagen (ver Dockerfile).
+    "pytesseract==0.3.13",
+    "pdf2image==1.17.0",
+    "pillow==11.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest==8.3.4",
+    "httpx==0.28.1",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

@@ -1,0 +1,19 @@
+# El contexto de build del frontend es la raíz del repo. Sin esto se enviaban
+# al demonio node_modules, dist y los 5 MB de dummy-non-existing-folder.
+node_modules
+dist
+dist-ssr
+dummy-non-existing-folder
+backend
+.git
+.github
+.claude
+.gemini
+*.log
+.env
+.env.*
+!.env.example
+review-*.pdf
+review-*.xlsx
+test-fixture.*
+debug-real.pdf
