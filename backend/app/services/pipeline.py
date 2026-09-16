@@ -47,7 +47,17 @@ def process_batch(session: Session, batch_id: int, settings: Settings) -> None:
 
         for source in sources:
             source_path = Path(source.stored_path)
-            texts = pdf_service.extract_text_per_page(source_path, settings.ocr_language)
+
+            # El progreso se cuenta por página LEÍDA, no por documento escrito:
+            # en un PDF escaneado el OCR se lleva casi todo el tiempo, y contar
+            # sólo al final dejaba la barra a cero durante minutos.
+            def pagina_leida(_index: int, batch=batch) -> None:
+                batch.pages_done += 1
+                session.commit()
+
+            texts = pdf_service.extract_text_per_page(
+                source_path, settings.ocr_language, on_page=pagina_leida
+            )
             source.page_count = len(texts)
             session.commit()
 
@@ -76,7 +86,6 @@ def process_batch(session: Session, batch_id: int, settings: Settings) -> None:
                 )
                 session.add(document)
 
-                batch.pages_done += len(group.indices)
                 session.commit()
 
         batch.status = BatchStatus.COMPLETADO

@@ -8,6 +8,7 @@ y se le pasa Tesseract nativo, que es bastante más rápido que el WASM.
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from pathlib import Path
 
 import pdfplumber
@@ -50,8 +51,18 @@ def _ocr_page(path: Path, page_index: int, language: str) -> str:
         return ""
 
 
-def extract_text_per_page(path: Path, language: str = "spa") -> list[str]:
-    """Texto de cada página, en orden, con OCR de respaldo."""
+def extract_text_per_page(
+    path: Path,
+    language: str = "spa",
+    on_page: Callable[[int], None] | None = None,
+) -> list[str]:
+    """Texto de cada página, en orden, con OCR de respaldo.
+
+    `on_page` se llama con el índice de cada página en cuanto su texto es
+    definitivo. Hace falta porque en un PDF escaneado esta función se lleva casi
+    todo el tiempo del lote: sin avisar por página, la barra de progreso se
+    queda quieta varios minutos y parece que el proceso está colgado.
+    """
     texts: list[str] = []
     with pdfplumber.open(str(path)) as pdf:
         for index, page in enumerate(pdf.pages):
@@ -62,9 +73,22 @@ def extract_text_per_page(path: Path, language: str = "spa") -> list[str]:
                 text = ""
             texts.append(text)
 
-    for index, text in enumerate(texts):
-        if len(text.strip()) < MIN_TEXT_CHARS:
-            texts[index] = _ocr_page(path, index, language)
+    # Las páginas con texto embebido ya están listas: se cuentan de inmediato y
+    # el resto del tiempo es OCR puro, que es lo que hay que ir reportando.
+    necesitan_ocr = [i for i, t in enumerate(texts) if len(t.strip()) < MIN_TEXT_CHARS]
+    if on_page:
+        pendientes = set(necesitan_ocr)
+        for index in range(len(texts)):
+            if index not in pendientes:
+                on_page(index)
+
+    if necesitan_ocr:
+        logger.info("OCR de %s de %s páginas de %s", len(necesitan_ocr), len(texts), path.name)
+
+    for index in necesitan_ocr:
+        texts[index] = _ocr_page(path, index, language)
+        if on_page:
+            on_page(index)
 
     return texts
 

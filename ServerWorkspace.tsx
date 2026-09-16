@@ -26,6 +26,27 @@ interface ServerWorkspaceProps {
 
 const POLL_MS = 2000;
 
+/**
+ * Estimación del tiempo que queda, a partir del ritmo real. Con un PDF
+ * escaneado de cientos de páginas la espera son minutos, y sin una cifra no hay
+ * forma de saber si el proceso avanza o se ha atascado.
+ *
+ * No devuelve nada hasta tener unas cuantas páginas: con dos o tres, la
+ * estimación oscila tanto que engaña más de lo que ayuda.
+ */
+const tiempoRestante = (batch: BatchDetail): string | null => {
+  if (!batch.started_at || batch.pages_done < 5) return null;
+  const transcurrido = Date.now() - new Date(batch.started_at).getTime();
+  if (transcurrido <= 0) return null;
+
+  const segundos = Math.round(
+    (transcurrido / batch.pages_done) * (batch.pages_total - batch.pages_done) / 1000
+  );
+  if (segundos < 60) return 'menos de un minuto';
+  const minutos = Math.round(segundos / 60);
+  return minutos === 1 ? '1 minuto' : `${minutos} minutos`;
+};
+
 const errorMessage = (err: unknown): string =>
   err instanceof ApiError || err instanceof Error ? err.message : String(err);
 
@@ -49,6 +70,9 @@ const ServerWorkspace: React.FC<ServerWorkspaceProps> = ({ modeSwitch }) => {
   const [busyDoc, setBusyDoc] = useState<number | null>(null);
   const [zoom, setZoom] = useState<{ sourceId: number; pageIndex: number } | null>(null);
   const [descargado, setDescargado] = useState(false);
+  // Se calcula al recibir cada sondeo, no en el render: Date.now() ahí dentro
+  // haría el render impuro.
+  const [restante, setRestante] = useState<string | null>(null);
 
   const refreshClients = useCallback(async () => {
     try {
@@ -89,6 +113,7 @@ const ServerWorkspace: React.FC<ServerWorkspaceProps> = ({ modeSwitch }) => {
         const data = await getBatch(batchId);
         if (cancelled) return;
         setDetail(data);
+        setRestante(tiempoRestante(data));
         setError(null);
         if (ACTIVE_STATUSES.includes(data.status)) timer = setTimeout(tick, POLL_MS);
       } catch (err) {
@@ -182,6 +207,7 @@ const ServerWorkspace: React.FC<ServerWorkspaceProps> = ({ modeSwitch }) => {
   const progreso = detail && detail.pages_total > 0
     ? Math.round((detail.pages_done / detail.pages_total) * 100)
     : 0;
+
 
   const pasos: { id: Paso; titulo: string }[] = [
     { id: 'clientes', titulo: '1. Clientes' },
@@ -343,12 +369,18 @@ const ServerWorkspace: React.FC<ServerWorkspaceProps> = ({ modeSwitch }) => {
                 <div className="bg-white p-8 rounded-[2rem] shadow-sm border border-slate-100 space-y-3">
                   <div className="flex justify-between text-[10px] font-black uppercase tracking-widest text-slate-500">
                     <span><i className="fas fa-circle-notch fa-spin text-red-600 mr-3"></i>Clasificando...</span>
-                    <span className="text-slate-400">{detail?.pages_done ?? 0} / {detail?.pages_total ?? 0} páginas</span>
+                    <span className="text-slate-400">
+                      {detail?.pages_done ?? 0} / {detail?.pages_total ?? 0} páginas
+                      {progreso > 0 && <span className="ml-2 text-slate-300">({progreso}%)</span>}
+                    </span>
                   </div>
                   <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
                     <div className="bg-red-600 h-full rounded-full transition-all duration-500" style={{ width: `${progreso}%` }}></div>
                   </div>
                   <p className="text-[9px] font-bold text-slate-300 leading-relaxed">
+                    {restante
+                      ? `Quedan unos ${restante}. `
+                      : 'Un PDF escaneado tarda bastante más, porque hay que pasarle OCR página a página. '}
                     Puedes cerrar la pestaña: el servidor sigue trabajando y al volver
                     lo encuentras donde lo dejaste.
                   </p>
