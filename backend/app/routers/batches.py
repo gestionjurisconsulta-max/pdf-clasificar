@@ -5,8 +5,9 @@ import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Request, UploadFile, status
 from fastapi.responses import StreamingResponse
+from starlette.background import BackgroundTask
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
@@ -17,7 +18,9 @@ from ..models import Batch, Document, SourceFile
 from ..schemas import BatchDetail, BatchOut, DocumentOut
 from ..services import pdf as pdf_service
 from ..services.naming import sanitize_name
+from ..services.cleanup import purge_expired, purge_session
 from ..services.pipeline import process_batch
+from ..session import current as current_session
 
 router = APIRouter(prefix="/api/batches", tags=["lotes"])
 
@@ -33,10 +36,13 @@ def _run_batch(batch_id: int, settings: Settings) -> None:
 
 
 @router.get("", response_model=list[BatchOut])
-def list_batches(limit: int = 50, session: Session = Depends(get_session)) -> list[Batch]:
+def list_batches(
+    request: Request, limit: int = 50, session: Session = Depends(get_session)
+) -> list[Batch]:
     query = (
         select(Batch)
         .options(selectinload(Batch.sources))
+        .where(Batch.session_id == current_session(request))
         .order_by(Batch.created_at.desc())
         .limit(min(limit, 200))
     )
@@ -45,6 +51,7 @@ def list_batches(limit: int = 50, session: Session = Depends(get_session)) -> li
 
 @router.post("", response_model=BatchOut, status_code=status.HTTP_202_ACCEPTED)
 async def create_batch(
+    request: Request,
     background: BackgroundTasks,
     files: list[UploadFile] = File(...),
     name: str | None = None,
@@ -60,7 +67,15 @@ async def create_batch(
     if not pdfs:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Hay que subir al menos un PDF.")
 
+    # Aprovecha cada subida para barrer los trabajos abandonados: evita montar
+    # un planificador sólo para eso.
+    try:
+        purge_expired(session, settings)
+    except Exception:  # noqa: BLE001 - el barrido no debe impedir trabajar
+        session.rollback()
+
     batch = Batch(
+        session_id=current_session(request),
         name=name or f"Lote {datetime.now(timezone.utc):%Y-%m-%d %H:%M}",
         status=BatchStatus.PENDIENTE,
     )
@@ -111,11 +126,13 @@ async def create_batch(
 
 
 @router.get("/{batch_id}", response_model=BatchDetail)
-def get_batch(batch_id: int, session: Session = Depends(get_session)) -> BatchDetail:
+def get_batch(
+    batch_id: int, request: Request, session: Session = Depends(get_session)
+) -> BatchDetail:
     batch = session.execute(
         select(Batch)
         .options(selectinload(Batch.sources), selectinload(Batch.documents).selectinload(Document.client))
-        .where(Batch.id == batch_id)
+        .where(Batch.id == batch_id, Batch.session_id == current_session(request))
     ).scalar_one_or_none()
     if batch is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Lote no encontrado.")
@@ -149,11 +166,34 @@ def get_batch(batch_id: int, session: Session = Depends(get_session)) -> BatchDe
     )
 
 
+def _borrar_tras_descargar(session_id: str, settings: Settings) -> None:
+    """Se ejecuta DESPUÉS de enviar el ZIP, con su propia sesión de base de
+    datos: si el navegador corta la descarga a mitad, no se llega aquí y el
+    trabajo sigue disponible para reintentarlo."""
+    db = SessionLocal()
+    try:
+        purge_session(db, session_id, settings)
+    finally:
+        db.close()
+
+
 @router.get("/{batch_id}/download")
-def download_batch(batch_id: int, session: Session = Depends(get_session)) -> StreamingResponse:
-    """Devuelve el lote entero como ZIP, con la estructura de carpetas
-    Facturas/<cliente> y Albaranes/<cliente>."""
-    batch = session.get(Batch, batch_id)
+def download_batch(
+    batch_id: int,
+    request: Request,
+    session: Session = Depends(get_session),
+    settings: Settings = Depends(get_settings),
+) -> StreamingResponse:
+    """Devuelve el lote como ZIP y **borra todo**: los PDF subidos, los
+    documentos generados, las miniaturas y la lista de clientes.
+
+    La aplicación no guarda nada. El ZIP es el resultado y el final del trabajo.
+    """
+    session_id = current_session(request)
+
+    batch = session.execute(
+        select(Batch).where(Batch.id == batch_id, Batch.session_id == session_id)
+    ).scalar_one_or_none()
     if batch is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Lote no encontrado.")
     if batch.status is not BatchStatus.COMPLETADO:
@@ -165,8 +205,10 @@ def download_batch(batch_id: int, session: Session = Depends(get_session)) -> St
         select(Document).where(Document.batch_id == batch_id)
     ).scalars().all()
 
+    # El ZIP se arma entero en memoria ANTES de borrar nada: si se sirviera
+    # leyendo del disco a la vez que se borra, la descarga saldría incompleta.
     buffer = io.BytesIO()
-    root = Path(str(get_settings().documents_dir / f"batch-{batch_id}"))
+    root = Path(str(settings.documents_dir / f"batch-{batch_id}"))
     with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
         for document in documents:
             path = Path(document.stored_path)
@@ -179,4 +221,5 @@ def download_batch(batch_id: int, session: Session = Depends(get_session)) -> St
         buffer,
         media_type="application/zip",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        background=BackgroundTask(_borrar_tras_descargar, session_id, settings),
     )

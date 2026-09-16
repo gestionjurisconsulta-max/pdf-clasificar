@@ -33,6 +33,7 @@ services:
       STORAGE_DIR: /data
       OCR_LANGUAGE: ${OCR_LANGUAGE:-spa}
       MAX_UPLOAD_BYTES: ${MAX_UPLOAD_BYTES:-209715200}
+      PURGE_AFTER_HOURS: ${PURGE_AFTER_HOURS:-24}
     volumes:
       - storage:/data
     healthcheck:

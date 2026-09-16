@@ -4,14 +4,17 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from ..config import Settings, get_settings
 from ..db import get_session
-from ..models import SourceFile
+from sqlalchemy import select
+
+from ..models import Batch, SourceFile
 from ..services import thumbnails
+from ..session import current as current_session
 
 router = APIRouter(prefix="/api/sources", tags=["páginas"])
 
@@ -20,11 +23,18 @@ router = APIRouter(prefix="/api/sources", tags=["páginas"])
 def page_image(
     source_id: int,
     page_index: int,
+    request: Request,
     zoom: bool = False,
     session: Session = Depends(get_session),
     settings: Settings = Depends(get_settings),
 ) -> Response:
-    source = session.get(SourceFile, source_id)
+    # También acotado a la sesión: las miniaturas son el contenido de las
+    # facturas de alguien.
+    source = session.execute(
+        select(SourceFile)
+        .join(Batch, Batch.id == SourceFile.batch_id)
+        .where(SourceFile.id == source_id, Batch.session_id == current_session(request))
+    ).scalar_one_or_none()
     if source is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "PDF de origen no encontrado.")
     if not 0 <= page_index < source.page_count:

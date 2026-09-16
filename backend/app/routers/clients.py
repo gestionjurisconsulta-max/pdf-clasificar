@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -10,6 +10,7 @@ from ..models import Client, ClientImport
 from ..schemas import ClientOut, ImportFileResult, ImportResult
 from ..services.excel import parse_clients
 from ..services.matching import canonical_form
+from ..session import current as current_session
 
 router = APIRouter(prefix="/api/clients", tags=["clientes"])
 
@@ -18,11 +19,17 @@ ALLOWED_SUFFIXES = (".xlsx", ".xlsm", ".xls", ".csv")
 
 @router.get("", response_model=list[ClientOut])
 def list_clients(
+    request: Request,
     search: str | None = None,
     limit: int = 500,
     session: Session = Depends(get_session),
 ) -> list[Client]:
-    query = select(Client).order_by(Client.name)
+    # Siempre acotado a la sesión: es lo que impide ver los clientes de otro.
+    query = (
+        select(Client)
+        .where(Client.session_id == current_session(request))
+        .order_by(Client.name)
+    )
     if search:
         pattern = f"%{search.lower()}%"
         query = query.where(
@@ -33,6 +40,7 @@ def list_clients(
 
 @router.post("/import", response_model=ImportResult, status_code=status.HTTP_201_CREATED)
 async def import_clients(
+    request: Request,
     files: list[UploadFile] = File(...),
     session: Session = Depends(get_session),
     settings: Settings = Depends(get_settings),
@@ -45,6 +53,8 @@ async def import_clients(
     """
     if not files:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "No se ha subido ningún fichero.")
+
+    session_id = current_session(request)
 
     results: list[ImportFileResult] = []
 
@@ -89,10 +99,19 @@ async def import_clients(
             if not key:
                 continue
             existing = session.execute(
-                select(Client).where(Client.cif_canonical == key)
+                select(Client).where(
+                    Client.session_id == session_id, Client.cif_canonical == key
+                )
             ).scalar_one_or_none()
             if existing is None:
-                session.add(Client(cif_canonical=key, cif=row.cif, name=row.name))
+                session.add(
+                    Client(
+                        session_id=session_id,
+                        cif_canonical=key,
+                        cif=row.cif,
+                        name=row.name,
+                    )
+                )
                 created += 1
             elif existing.name != row.name or existing.cif != row.cif:
                 existing.name = row.name
@@ -103,6 +122,7 @@ async def import_clients(
 
         session.add(
             ClientImport(
+                session_id=session_id,
                 filename=filename,
                 rows_read=len(parsed),
                 clients_created=created,
@@ -117,5 +137,7 @@ async def import_clients(
             )
         )
 
-    total = session.execute(select(func.count()).select_from(Client)).scalar_one()
+    total = session.execute(
+        select(func.count()).select_from(Client).where(Client.session_id == session_id)
+    ).scalar_one()
     return ImportResult(files=results, total_clients=total)

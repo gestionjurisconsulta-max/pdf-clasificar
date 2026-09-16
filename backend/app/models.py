@@ -30,7 +30,10 @@ class Client(Base):
     __tablename__ = "clients"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    cif_canonical: Mapped[str] = mapped_column(String(32), unique=True, index=True)
+    # Sesión anónima a la que pertenece: el mismo CIF puede estar en las listas
+    # de varias personas sin que se pisen.
+    session_id: Mapped[str] = mapped_column(String(64), index=True)
+    cif_canonical: Mapped[str] = mapped_column(String(32), index=True)
     cif: Mapped[str] = mapped_column(String(32))
     name: Mapped[str] = mapped_column(String(255))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
@@ -48,6 +51,7 @@ class ClientImport(Base):
     __tablename__ = "client_imports"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    session_id: Mapped[str] = mapped_column(String(64), index=True)
     filename: Mapped[str] = mapped_column(String(255))
     rows_read: Mapped[int] = mapped_column(Integer, default=0)
     clients_created: Mapped[int] = mapped_column(Integer, default=0)
@@ -61,6 +65,7 @@ class Batch(Base):
     __tablename__ = "batches"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    session_id: Mapped[str] = mapped_column(String(64), index=True)
     name: Mapped[str] = mapped_column(String(255))
     status: Mapped[BatchStatus] = mapped_column(
         Enum(BatchStatus, name="batch_status", values_callable=lambda e: [m.value for m in e]),
@@ -131,3 +136,4 @@ class Document(Base):
 
 
 Index("ix_documents_batch_type", Document.batch_id, Document.doc_type)
+Index("ix_clients_session_cif", Client.session_id, Client.cif_canonical, unique=True)

@@ -28,6 +28,11 @@ class Settings(BaseSettings):
     # Idioma de Tesseract para las páginas escaneadas.
     ocr_language: str = "spa"
 
+    # Los datos son efímeros: se borran al descargar el ZIP. Esta ventana es
+    # sólo para los trabajos abandonados, que si no se quedarían en el disco
+    # para siempre.
+    purge_after_hours: int = 24
+
     @property
     def uploads_dir(self) -> Path:
         return self.storage_dir / "uploads"

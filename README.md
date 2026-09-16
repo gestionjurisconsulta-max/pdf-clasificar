@@ -13,12 +13,19 @@ Servidor cuando la API responde y en Local cuando no.
 | Cuántos ficheros | Varios Excel y varios PDF a la vez | Un PDF |
 | Separa albaranes | Sí | No |
 | Revisión visual | No | Sí: miniaturas, rotar, borrar, agrupar |
-| Histórico | Sí, en PostgreSQL | No, se pierde al recargar |
+| Histórico | No: se borra al descargar el ZIP | No, se pierde al recargar |
 | Necesita servidor | Sí | No |
 
 **Servidor** es el modo para el día a día en el VPS: subes los Excel de clientes
 y los PDF del mes, y el backend los trocea, separa facturas de albaranes y los
-reparte por cliente. Ver [docs/arquitectura.md](docs/arquitectura.md).
+reparte por cliente. Puedes revisar el resultado y corregir el cliente, el tipo
+o el troceado antes de descargar.
+
+**No guarda nada.** Al descargar el ZIP, el servidor borra los PDF, los
+documentos generados y la lista de clientes. No hay inicio de sesión, pero cada
+navegador trabaja aislado de los demás mediante un identificador anónimo: dos
+personas pueden usarlo a la vez sin verse. Ver
+[docs/arquitectura.md](docs/arquitectura.md).
 
 **Local** es el modo para cuando hace falta ojo humano sobre un documento
 concreto: enseña una miniatura por página y deja rotar, borrar y agrupar a mano

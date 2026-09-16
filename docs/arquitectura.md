@@ -36,12 +36,38 @@ contra el VPS.
 El backend corre como usuario sin privilegios (uid 10001): si alguien lograra
 ejecutar algo a través de un PDF manipulado, no sería como root.
 
+## Los datos son efímeros y están aislados por sesión
+
+La aplicación **no guarda nada**. Un trabajo empieza al subir el Excel de
+clientes y termina al descargar el ZIP: en ese momento el servidor borra los PDF
+subidos, los documentos generados, las miniaturas y la propia lista de clientes.
+
+No hay inicio de sesión, pero tampoco una base común. Cada navegador recibe un
+identificador anónimo de 32 caracteres en una cookie `HttpOnly`, y todo lo que
+sube queda atado a él. Hace falta incluso dentro de un mismo despacho: dos
+personas manejan listas de clientes distintas, y sin aislamiento la segunda
+vería los clientes de la primera y podría descargarse su ZIP cambiando el
+número en la URL.
+
+El identificador **no identifica a nadie**: sólo separa un trabajo de otro.
+Sólo se aceptan los que ha emitido el servidor (32 hex), de modo que no sirve
+ponerlo a mano.
+
+Todas las consultas filtran por sesión, incluidas las miniaturas y los endpoints
+de corrección. Un id de otra persona devuelve 404, no 403: no se confirma
+siquiera que exista.
+
+Los trabajos abandonados —quien sube un PDF y nunca descarga— caducan a las
+`PURGE_AFTER_HOURS` horas (24 por defecto). El barrido se ejecuta al arrancar y
+cada vez que se crea un lote, para no montar un planificador sólo para eso.
+
 ## Modelo de datos
 
-- **clients** — clientes receptores. La clave real es `cif_canonical`, el CIF
-  normalizado con las confusiones típicas de OCR (B↔8, G↔6, O↔0, I/L↔1, S↔5).
-  Es lo que permite subir varios Excel sin duplicar: `B12345678` y
-  `B-12.345.678` son el mismo cliente.
+- **clients** — clientes receptores. La clave real es `(session_id,
+  cif_canonical)`: el CIF normalizado con las confusiones típicas de OCR (B↔8,
+  G↔6, O↔0, I/L↔1, S↔5), único **dentro de cada sesión**. Es lo que permite
+  subir varios Excel sin duplicar (`B12345678` y `B-12.345.678` son el mismo
+  cliente) sin impedir que dos personas tengan el mismo cliente en sus listas.
 - **client_imports** — histórico de Excel subidos, con qué aportó cada uno.
 - **batches** — un lote de proceso, con su estado y su progreso.
 - **source_files** — cada PDF original del lote.
@@ -63,7 +89,14 @@ Las migraciones son de Alembic y se aplican solas al arrancar el backend
    - se busca el cliente cruzando el texto con la tabla `clients`;
    - se trocea el PDF y se guarda cada documento en su carpeta.
 3. `GET /api/batches/{id}` da el estado y el detalle; `/download` devuelve el
-   ZIP con la estructura `Facturas/<cliente>/` y `Albaranes/<cliente>/`.
+   ZIP con la estructura `Facturas/<cliente>/` y `Albaranes/<cliente>/` **y
+   borra todo**.
+
+El ZIP se arma entero en memoria antes de borrar nada: servirlo leyendo del
+disco mientras se borra daría una descarga incompleta. Y el borrado va en un
+`BackgroundTask`, que se ejecuta después de enviar la respuesta: si el navegador
+corta la descarga a mitad, no se llega a borrar y el trabajo sigue ahí para
+reintentarlo.
 
 El trabajo en segundo plano usa `BackgroundTasks` de FastAPI: se ejecuta dentro
 del propio proceso del backend. Es suficiente para el volumen de un despacho y
@@ -152,10 +185,9 @@ Recomendaciones para producción:
   `docker-compose.yml`) y pon delante Caddy o Traefik para el TLS. **La API no
   tiene autenticación**: expuesta a internet, cualquiera podría subir ficheros
   y descargar los lotes.
-- Haz copia del volumen `db-data` (los datos) y del volumen `storage` (los PDF).
-  `docker compose exec db pg_dump -U pdfclasificar pdfclasificar` para la base.
-- Los PDF procesados se acumulan en `storage`. Todavía no hay borrado
-  automático de lotes antiguos.
+- **No hace falta copia de seguridad**: no hay nada que conservar. Los datos
+  viven lo que dura un trabajo. Lo único que conviene vigilar es que el volumen
+  `storage` no crezca, y de eso se encarga el barrido de trabajos abandonados.
 
 ## El frontend
 

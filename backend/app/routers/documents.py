@@ -8,7 +8,7 @@ carpeta que le corresponde.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -16,9 +16,10 @@ from sqlalchemy.orm import Session
 from ..config import Settings, get_settings
 from ..db import get_session
 from ..enums import DocumentType
-from ..models import Client, Document, SourceFile
+from ..models import Batch, Client, Document, SourceFile
 from ..schemas import DocumentOut
 from ..services import storage
+from ..session import current as current_session
 
 router = APIRouter(prefix="/api/documents", tags=["documentos"])
 
@@ -56,8 +57,15 @@ def _to_out(document: Document) -> DocumentOut:
     )
 
 
-def _get(session: Session, document_id: int) -> Document:
-    document = session.get(Document, document_id)
+def _get(session: Session, request: Request, document_id: int) -> Document:
+    """Un documento sólo existe para la sesión que lo creó: sin este filtro,
+    cualquiera podría corregir (o leer) los documentos de otra persona probando
+    números de id."""
+    document = session.execute(
+        select(Document)
+        .join(Batch, Batch.id == Document.batch_id)
+        .where(Document.id == document_id, Batch.session_id == current_session(request))
+    ).scalar_one_or_none()
     if document is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Documento no encontrado.")
     return document
@@ -74,10 +82,11 @@ def _client_name(session: Session, client_id: int | None) -> str | None:
 def update_document(
     document_id: int,
     update: DocumentUpdate,
+    request: Request,
     session: Session = Depends(get_session),
     settings: Settings = Depends(get_settings),
 ) -> DocumentOut:
-    document = _get(session, document_id)
+    document = _get(session, request, document_id)
     source = session.get(SourceFile, document.source_file_id)
     if source is None:
         raise HTTPException(status.HTTP_409_CONFLICT, "Falta el PDF de origen del documento.")
@@ -85,7 +94,13 @@ def update_document(
     if update.clear_client:
         document.client_id = None
     elif update.client_id is not None:
-        if session.get(Client, update.client_id) is None:
+        propio = session.execute(
+            select(Client).where(
+                Client.id == update.client_id,
+                Client.session_id == current_session(request),
+            )
+        ).scalar_one_or_none()
+        if propio is None:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "Ese cliente no existe.")
         document.client_id = update.client_id
 
@@ -107,21 +122,22 @@ def update_document(
 @router.post("/{document_id}/split", response_model=list[DocumentOut])
 def split_document(
     document_id: int,
-    request: SplitRequest,
+    body: SplitRequest,
+    request: Request,
     session: Session = Depends(get_session),
     settings: Settings = Depends(get_settings),
 ) -> list[DocumentOut]:
     """Parte un documento en dos. Útil cuando la detección unió dos facturas
     que no iban juntas."""
-    document = _get(session, document_id)
+    document = _get(session, request, document_id)
     source = session.get(SourceFile, document.source_file_id)
     if source is None:
         raise HTTPException(status.HTTP_409_CONFLICT, "Falta el PDF de origen del documento.")
 
     pages = list(document.page_indices)
-    if request.at_page not in pages:
+    if body.at_page not in pages:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Esa página no está en el documento.")
-    position = pages.index(request.at_page)
+    position = pages.index(body.at_page)
     if position == 0:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
@@ -161,12 +177,13 @@ def split_document(
 @router.post("/{document_id}/merge-next", response_model=DocumentOut)
 def merge_with_next(
     document_id: int,
+    request: Request,
     session: Session = Depends(get_session),
     settings: Settings = Depends(get_settings),
 ) -> DocumentOut:
     """Absorbe el documento siguiente del mismo PDF. Útil cuando una hoja de
     continuación quedó suelta."""
-    document = _get(session, document_id)
+    document = _get(session, request, document_id)
     source = session.get(SourceFile, document.source_file_id)
     if source is None:
         raise HTTPException(status.HTTP_409_CONFLICT, "Falta el PDF de origen del documento.")
