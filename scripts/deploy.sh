@@ -51,6 +51,30 @@ if ! grep -qE '^POSTGRES_PASSWORD=.+' .env; then
     exit 1
 fi
 
+# tail -1 porque gana la última si está repetida, igual que hace compose, y el
+# sed quita un posible comentario al final de la línea.
+PUERTO="$(grep -E '^HTTP_PORT=' .env | tail -1 | cut -d= -f2 | sed -E 's/#.*//' | tr -d '[:space:]')"
+PUERTO="${PUERTO:-8080}"
+
+# En un VPS compartido el choque de puertos es el fallo más probable, y Docker
+# sólo lo descubre al final: después de reconstruir las imágenes y con la mitad
+# de la pila ya levantada. Comprobarlo aquí cuesta nada y falla en el acto.
+if command -v ss >/dev/null 2>&1 && ss -ltn 2>/dev/null | grep -q ":$PUERTO "; then
+    # Que el puerto esté ocupado por NUESTRO frontend de un despliegue anterior
+    # es normal: compose lo va a reemplazar.
+    MIO="$(docker compose port frontend 80 2>/dev/null || true)"
+    case "$MIO" in
+        *":$PUERTO") ;;
+        *)
+            rojo "El puerto $PUERTO ya está ocupado en esta máquina, y no por este proyecto:"
+            ss -ltnp 2>/dev/null | grep ":$PUERTO " >&2
+            rojo "Elige otro en HTTP_PORT del .env (y cámbialo también en el vhost de nginx)."
+            rojo "Para encontrar el primero libre:"
+            rojo "    for p in \$(seq $PUERTO $((PUERTO + 50))); do ss -ltn | grep -q \":\$p \" || { echo \$p; break; }; done"
+            exit 1 ;;
+    esac
+fi
+
 # --- Actualizar el código ---------------------------------------------------
 
 if [ "$PULL" -eq 1 ] && [ -d .git ]; then
@@ -73,11 +97,6 @@ info "Construyendo y arrancando los contenedores"
 docker compose up -d --build --wait --wait-timeout 300
 
 # --- Comprobación real ------------------------------------------------------
-
-# tail -1 porque gana la última si está repetida, igual que hace compose, y el
-# sed quita un posible comentario al final de la línea.
-PUERTO="$(grep -E '^HTTP_PORT=' .env | tail -1 | cut -d= -f2 | sed -E 's/#.*//' | tr -d '[:space:]')"
-PUERTO="${PUERTO:-8080}"
 
 info "Comprobando la API en 127.0.0.1:$PUERTO"
 if curl --fail --silent --show-error --max-time 15 "http://127.0.0.1:$PUERTO/api/health" >/dev/null; then

@@ -14,7 +14,7 @@ volúmenes o redes que no sean suyos.
 |---|---|
 | Docker Engine con el plugin `compose` v2 | `docker compose version` |
 | nginx en el host | `nginx -v` |
-| certbot | `apt install certbot` |
+| certbot | `dnf install epel-release certbot` / `apt install certbot` |
 | git | `git --version` |
 | Disco | ~3 GB para las imágenes, más lo que ocupen los lotes en curso |
 | RAM | ~1 GB en reposo; el pico de OCR está limitado a 2 GB |
@@ -29,7 +29,7 @@ El `docker-compose` antiguo (el binario con guion, v1) no vale: el fichero usa
 ├── .env                      <- NO está en git: se crea a mano en el VPS
 ├── docker-compose.yml
 ├── scripts/deploy.sh
-└── deploy/nginx/gestion.pdf.iages.es.conf
+└── deploy/nginx/pdf-clasificar.conf
 ```
 
 Los datos **no** viven en `/opt`, sino en volúmenes de Docker, que compose
@@ -77,15 +77,22 @@ nano .env
 chmod 600 .env
 ```
 
-Antes de seguir, comprueba que el puerto que has puesto en `HTTP_PORT` está
-libre en la máquina:
+Comprueba que el puerto de `HTTP_PORT` está libre. En un VPS con varios
+proyectos, lo normal es que el 8080 ya esté cogido:
 
 ```bash
 ss -ltnp | grep :8080
 ```
 
-Si contesta algo, es de otro proyecto: cambia `HTTP_PORT` en `.env` **y** el
-`proxy_pass` del vhost de nginx para que coincidan.
+Si contesta algo, busca el primero libre y ponlo en `.env`:
+
+```bash
+for p in $(seq 8080 8130); do ss -ltn | grep -q ":$p " || { echo "primer puerto libre: $p"; break; }; done
+```
+
+`deploy.sh` lo comprueba también antes de construir, así que no te dejará
+llegar a medio despliegue para descubrirlo. El vhost se ajusta solo al puerto
+del `.env` en el paso 7.
 
 ### 3. Arrancar
 
@@ -95,11 +102,8 @@ Si contesta algo, es de otro proyecto: cambia `HTTP_PORT` en `.env` **y** el
 
 El script comprueba los requisitos, construye las imágenes, espera a que los
 healthchecks pasen y llama a `/api/health`. Si termina sin error, la aplicación
-ya responde en `127.0.0.1:8080` — todavía sólo desde dentro del VPS.
-
-```bash
-curl http://127.0.0.1:8080/api/health
-```
+ya responde en el puerto que pusiste — todavía sólo desde dentro del VPS. El
+propio script lo dice en su última línea.
 
 ### 4. El DNS
 
@@ -110,7 +114,27 @@ pedir el certificado, porque Let's Encrypt limita los intentos fallidos:
 dig +short gestion.pdf.iages.es
 ```
 
-### 5. El certificado
+### 5. Dónde van los vhosts en tu distro
+
+Las dos familias colocan la configuración de nginx en sitios distintos, y los
+pasos siguientes usan esta variable para no depender de ello. Elige la línea
+que corresponda:
+
+```bash
+# Debian / Ubuntu
+VHOST=/etc/nginx/sites-available/pdf-clasificar.conf
+```
+
+```bash
+# Rocky / AlmaLinux / RHEL
+VHOST=/etc/nginx/conf.d/pdf-clasificar.conf
+```
+
+En Debian y Ubuntu hace falta además un enlace en `sites-enabled` para
+activarlo; en Rocky y derivados no, porque `nginx.conf` ya incluye
+`/etc/nginx/conf.d/*.conf` entero.
+
+### 6. El certificado
 
 Es el paso con trampa: el vhost definitivo tiene un bloque `listen 443` que
 referencia un certificado que aún no existe, y nginx se niega a arrancar si le
@@ -122,27 +146,51 @@ sudo mkdir -p /var/www/certbot
 ```
 
 ```bash
-printf 'server {\n    listen 80;\n    server_name gestion.pdf.iages.es;\n    location /.well-known/acme-challenge/ { root /var/www/certbot; }\n    location / { return 404; }\n}\n' | sudo tee /etc/nginx/sites-available/gestion.pdf.iages.es.conf
+printf 'server {
+    listen 80;
+    server_name gestion.pdf.iages.es;
+    location /.well-known/acme-challenge/ { root /var/www/certbot; }
+    location / { return 404; }
+}
+' | sudo tee "$VHOST"
 ```
 
+Sólo en Debian y Ubuntu, activarlo:
+
 ```bash
-sudo ln -s /etc/nginx/sites-available/gestion.pdf.iages.es.conf /etc/nginx/sites-enabled/
+sudo ln -sf "$VHOST" /etc/nginx/sites-enabled/
 ```
 
 ```bash
 sudo nginx -t && sudo systemctl reload nginx
 ```
 
+Si no tienes certbot: en Debian y Ubuntu es `apt install certbot`; en Rocky,
+`dnf install epel-release && dnf install certbot`, porque vive en EPEL.
+
 ```bash
 sudo certbot certonly --webroot -w /var/www/certbot -d gestion.pdf.iages.es
 ```
 
-### 6. El vhost definitivo
+### 7. El vhost definitivo
 
-Ya con el certificado en su sitio, se sustituye por el del repositorio:
+Ya con el certificado en su sitio, se sustituye por el del repositorio. El
+`sed` ajusta el `proxy_pass` al puerto que tengas en `.env`: el fichero viene
+con 8080, y si tuviste que cambiarlo porque otro proyecto lo ocupaba, sin esto
+el resultado es un 502 desconcertante.
 
 ```bash
-sudo cp /opt/pdf-clasificar/deploy/nginx/gestion.pdf.iages.es.conf /etc/nginx/sites-available/gestion.pdf.iages.es.conf
+PUERTO=$(grep -E '^HTTP_PORT=' /opt/pdf-clasificar/.env | tail -1 | cut -d= -f2 | tr -d '[:space:]')
+```
+
+```bash
+sed "s|proxy_pass http://127.0.0.1:8080;|proxy_pass http://127.0.0.1:${PUERTO:-8080};|" /opt/pdf-clasificar/deploy/nginx/pdf-clasificar.conf | sudo tee "$VHOST" >/dev/null
+```
+
+Comprueba que quedó el puerto correcto antes de recargar:
+
+```bash
+grep proxy_pass "$VHOST"
 ```
 
 ```bash
@@ -161,11 +209,41 @@ Puedes ensayarla sin gastar cuota:
 sudo certbot renew --dry-run
 ```
 
-### 7. El cortafuegos
+### 8. SELinux (sólo Rocky, AlmaLinux y RHEL)
 
-Al exterior sólo se abren 80 y 443. El 8080 no: ya está atado a `127.0.0.1`,
-pero si algún día alguien pone `HTTP_BIND=0.0.0.0` en `.env`, el cortafuegos es
-la segunda línea de defensa.
+Estas distribuciones traen SELinux en `enforcing`, y por defecto **prohíben a
+nginx abrir conexiones de red**. El síntoma es un 502 en el que la aplicación
+está perfectamente viva: `curl` desde la propia máquina funciona, pero a través
+de nginx no, y en `/var/log/nginx/error.log` aparece un `Permission denied` al
+conectar con `127.0.0.1`.
+
+Compruébalo y, si está activo, permite la conexión:
+
+```bash
+getenforce
+```
+
+```bash
+sudo setsebool -P httpd_can_network_connect 1
+```
+
+El `-P` hace el cambio permanente; sin él se pierde al reiniciar. Es un
+booleano de SELinux, no una regla para este puerto: afecta a todo lo que sirva
+nginx en la máquina.
+
+### 9. El cortafuegos
+
+Al exterior sólo se abren 80 y 443. El puerto de la aplicación no: ya está
+atado a `127.0.0.1`, pero si algún día alguien pone `HTTP_BIND=0.0.0.0` en
+`.env`, el cortafuegos es la segunda línea de defensa.
+
+En Rocky, AlmaLinux y RHEL:
+
+```bash
+sudo firewall-cmd --permanent --add-service=http --add-service=https && sudo firewall-cmd --reload
+```
+
+En Debian y Ubuntu:
 
 ```bash
 sudo ufw allow 'Nginx Full' && sudo ufw status
@@ -203,7 +281,7 @@ todos—, pero deja el servicio fuera del alcance de quien pase por ahí.
 ## Si usas Nginx Proxy Manager
 
 Si el VPS publica los proyectos con NPM en vez de con un nginx a pelo, olvida
-los pasos 5 y 6 y crea un *Proxy Host*:
+los pasos 5 a 9 y crea un *Proxy Host*:
 
 | Campo | Valor |
 |---|---|
@@ -299,10 +377,15 @@ docker compose exec -T db pg_dump -U pdfclasificar pdfclasificar | gzip > ~/pdf-
 
 ## Problemas frecuentes
 
-**502 Bad Gateway.** El proxy llega pero detrás no hay nadie. Mira si la pila
-está en pie (`docker compose ps`) y si el puerto del vhost coincide con
-`HTTP_PORT` del `.env`. Si el vhost dice `localhost` en vez de `127.0.0.1`,
-nginx puede estar resolviendo a `::1`, donde el contenedor no escucha.
+**502 Bad Gateway.** Tres causas, por orden de probabilidad. La primera: el
+puerto del vhost no coincide con `HTTP_PORT` del `.env` (`grep proxy_pass` en
+el vhost lo enseña). La segunda, sólo en Rocky, AlmaLinux y RHEL con SELinux en
+`enforcing`: nginx tiene prohibido conectar por red y hace falta
+`sudo setsebool -P httpd_can_network_connect 1`; se reconoce porque `curl` a
+`127.0.0.1:PUERTO` funciona desde la máquina y a través de nginx no, con un
+`Permission denied` en `/var/log/nginx/error.log`. La tercera: la pila no está
+en pie (`docker compose ps`). Y si el vhost dice `localhost` en vez de
+`127.0.0.1`, nginx puede resolver a `::1`, donde el contenedor no escucha.
 
 **413 Request Entity Too Large.** Hay tres límites en serie y manda el más bajo:
 `MAX_UPLOAD_BYTES` en `.env`, `client_max_body_size` en `docker/nginx.conf` (el
@@ -348,7 +431,7 @@ sudo rm -rf /opt/pdf-clasificar
 ```
 
 ```bash
-sudo rm -f /etc/nginx/sites-enabled/gestion.pdf.iages.es.conf /etc/nginx/sites-available/gestion.pdf.iages.es.conf
+sudo rm -f /etc/nginx/conf.d/pdf-clasificar.conf /etc/nginx/sites-enabled/pdf-clasificar.conf /etc/nginx/sites-available/pdf-clasificar.conf
 ```
 
 ```bash
