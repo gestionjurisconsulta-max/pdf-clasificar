@@ -22,6 +22,14 @@ export interface RenderOptions {
   quality?: number;
 }
 
+// La escala 1 de pdf.js son 72 dpi, así que 2.8 ronda los 200 dpi, que es el
+// mínimo habitual para que el OCR sea fiable. Con la escala por defecto (1.5,
+// ~108 dpi) Tesseract leía "867825950" donde ponía "B67825950" y se saltaba
+// marcadores como "Pág. 1 de 1", lo que hacía que dos documentos distintos
+// acabaran pegados. Renderizar a 200 dpi cuesta unas 3 veces más por página,
+// pero sólo se paga en los PDF escaneados, que son justo los que lo necesitan.
+const OCR_SCALE = 2.8;
+
 export const loadPdfDocument = async (file: File): Promise<pdfjs.PDFDocumentProxy> => {
   const arrayBuffer = await file.arrayBuffer();
   return await pdfjs.getDocument({
@@ -99,7 +107,7 @@ export const extractTextLocally = async (fileOrDoc: File | pdfjs.PDFDocumentProx
   // con PDF escaneados, y así no lastran la carga inicial de la app.
   if (!text.trim() || text.length < 10) {
     const { default: Tesseract } = await import('tesseract.js');
-    const imageUri = await pdfPageToImage(pdf, pageIndex);
+    const imageUri = await pdfPageToImage(pdf, pageIndex, { scale: OCR_SCALE });
     const { data: { text: ocrText } } = await Tesseract.recognize(
       imageUri,
       'spa',
