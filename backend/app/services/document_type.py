@@ -42,13 +42,32 @@ _DELIVERY_SIGNALS = (
 )
 
 
+# Un documento que ENCABEZA UNA LÍNEA declarando su propio número —
+# "ALBARÁN: A6-004757", "FACTURA: M6-001364"— está diciendo lo que es, y eso
+# manda sobre cualquier otra señal. Se exige que empiece la línea para no
+# confundirlo con una referencia dentro del cuerpo ("según nuestro albarán
+# A-3312") ni con el encabezado de la columna del cliente ("SOLICITANTE
+# FACTURA A").
+_SELF_TITLE = re.compile(
+    r"^[^\S\n]*(factura|albaran)(?:es)?[^\S\n]*"
+    r"(?:n[.ºo°]*[^\S\n]*)?"
+    r"(?::|(?=[a-z0-9][a-z0-9\-/.]*\d))",
+    re.MULTILINE,
+)
+
+
 def normalize(text: str) -> str:
     """Minúsculas y sin tildes: el OCR se come los acentos con frecuencia, así
-    que 'ALBARÁN', 'albaran' y 'Albarán' tienen que ser la misma palabra."""
+    que 'ALBARÁN', 'albaran' y 'Albarán' tienen que ser la misma palabra.
+
+    Se conservan los saltos de línea, porque saber que algo encabeza una línea
+    es justo lo que distingue el título de una referencia de pasada.
+    """
     lowered = (text or "").lower()
     decomposed = unicodedata.normalize("NFD", lowered)
     without_accents = "".join(c for c in decomposed if unicodedata.category(c) != "Mn")
-    return re.sub(r"\s+", " ", without_accents)
+    # Espacios horizontales colapsados, saltos de línea intactos.
+    return re.sub(r"[^\S\n]+", " ", without_accents)
 
 
 @dataclass
@@ -64,17 +83,26 @@ def detect_document_type(text: str) -> TypeVerdict:
 
     header = normalized[:HEADER_CHARS]
 
+    # 1. El documento declara su propio número al principio de una línea. Es la
+    #    señal más fuerte que existe y gana a todo lo demás, incluidos los
+    #    impuestos: hay proveedores que imprimen base imponible e IVA también en
+    #    sus albaranes, y darle prioridad a eso los clasificaba como facturas.
+    declarado = _SELF_TITLE.search(header)
+    if declarado:
+        tipo = DocumentType.ALBARAN if declarado.group(1) == "albaran" else DocumentType.FACTURA
+        return TypeVerdict(tipo, f"la página se titula «{declarado.group(1)}»")
+
     albaran_in_header = _ALBARAN_TITLE.search(header)
     factura_in_header = _FACTURA_TITLE.search(header)
     fiscal = sum(1 for s in _FISCAL_SIGNALS if s.search(normalized))
 
     if albaran_in_header:
-        # Liquidar impuestos pesa más que el título: un albarán lista mercancía,
-        # no calcula base imponible ni IVA. Si la página los calcula, es una
-        # factura que arrastra el número de albarán en el membrete.
+        # Sin título propio, "albarán" suelto puede ser una referencia dentro de
+        # una factura ("según nuestro albarán A-3312"). Ahí sí manda que la
+        # página liquide impuestos.
         if fiscal >= 2:
             return TypeVerdict(DocumentType.FACTURA, "menciona albarán pero liquida impuestos")
-        # Si aparecen los dos títulos, manda el que va ANTES: es el encabezado.
+        # Si aparecen los dos, manda el que va ANTES: es el encabezado.
         if factura_in_header and factura_in_header.start() < albaran_in_header.start():
             return TypeVerdict(DocumentType.FACTURA, "el título de la cabecera es factura")
         return TypeVerdict(DocumentType.ALBARAN, "la cabecera dice albarán")

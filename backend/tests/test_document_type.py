@@ -42,10 +42,55 @@ def test_una_factura_que_cita_su_albaran_sigue_siendo_factura():
     assert detect_document_type(texto).doc_type is DocumentType.FACTURA
 
 
-def test_un_albaran_mencionado_en_cabecera_con_impuestos_es_factura():
-    # Membrete con "albarán" pero la página liquida IVA: es una factura.
-    texto = "ALBARAN 3312 FACTURA\nBase imponible 100,00 IVA 21,00 TOTAL FACTURA 121,00"
+def test_una_mencion_suelta_a_un_albaran_con_impuestos_es_factura():
+    # Sin título propio: "albarán" aparece de pasada y la página liquida IVA.
+    texto = "Ref. albaran 3312 del pedido\nBase imponible 100,00 IVA 21,00 TOTAL FACTURA 121,00"
     assert detect_document_type(texto).doc_type is DocumentType.FACTURA
+
+
+# --- Casos tomados de documentos reales de un proveedor ---------------------
+# Sus albaranes imprimen base imponible e IVA igual que sus facturas, así que
+# lo único que los distingue es el título con el que se encabezan. Dar
+# prioridad a los impuestos los clasificaba a todos como facturas.
+
+ALBARAN_REAL = """RUIBAL LOSADA, S.A.
+RDA INDUSTRIA 30 BARBERA
+08210 - CIF A59191197
+ALBARAN: A6-004757 FECHA: 10/08/2026 Pag. 1 de 1
+SOLICITANTE FACTURA A
+LA CASA ALIMENT S.L
+NIF: B67825950
+Base imponible 420,00 IVA 21% 88,20 TOTAL 508,20
+"""
+
+FACTURA_REAL = """RUIBAL LOSADA, S.A.
+RDA INDUSTRIA 30 BARBERA
+08210 - CIF A59191197
+FACTURA: M6-001364 FECHA: 31/08/2026
+SOLICITANTE FACTURA A
+LA CASA ALIMENT S.L
+NIF: B67825950
+Base imponible 420,00 IVA 21% 88,20 TOTAL FACTURA 508,20
+"""
+
+
+def test_un_albaran_que_liquida_impuestos_sigue_siendo_albaran():
+    assert detect_document_type(ALBARAN_REAL).doc_type is DocumentType.ALBARAN
+
+
+def test_la_factura_del_mismo_proveedor_es_factura():
+    assert detect_document_type(FACTURA_REAL).doc_type is DocumentType.FACTURA
+
+
+def test_la_columna_del_cliente_no_se_confunde_con_el_titulo():
+    # "SOLICITANTE FACTURA A" encabeza la columna del destinatario: no debe
+    # contar como que la página se titule "factura".
+    assert detect_document_type(ALBARAN_REAL).doc_type is DocumentType.ALBARAN
+
+
+def test_tolera_que_el_ocr_pierda_la_tilde_del_titulo():
+    con_tilde = ALBARAN_REAL.replace("ALBARAN", "ALBARÁN")
+    assert detect_document_type(con_tilde).doc_type is DocumentType.ALBARAN
 
 
 def test_manda_el_titulo_que_aparece_antes():
