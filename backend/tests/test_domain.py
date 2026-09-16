@@ -178,3 +178,44 @@ class TestContinuation:
 
     def test_lista_vacia(self):
         assert group_by_continuation([]) == []
+
+
+class TestDocumentosCompletos:
+    """Caso real: un albarán de una hoja ("Pág. 1 de 1") seguido de la factura
+    de OTRO cliente. Sin esta regla, si el OCR de la segunda hoja falla, la hoja
+    parece "sin identidad propia" y se pega al albarán anterior."""
+
+    ALBARAN_COMPLETO = (
+        "RUIBAL LOSADA CIF A59191197\n"
+        "ALBARAN: A6-004757 FECHA: 10/08/2026 Pag. 1 de 1\n"
+        "LA CASA ALIMENT SL NIF: B67825950"
+    )
+
+    def test_no_admite_mas_hojas_tras_un_pagina_1_de_1(self):
+        grupos = group_by_continuation([
+            PageText(0, self.ALBARAN_COMPLETO),
+            PageText(1, "hoja cuyo ocr no ha dejado nada reconocible aqui"),
+        ])
+        assert [g.indices for g in grupos] == [[0], [1]]
+
+    def test_tampoco_si_la_hoja_siguiente_sale_ilegible(self):
+        grupos = group_by_continuation([
+            PageText(0, self.ALBARAN_COMPLETO),
+            PageText(1, ""),
+        ])
+        assert [g.indices for g in grupos] == [[0], [1]]
+
+    def test_un_pagina_1_de_2_si_espera_su_segunda_hoja(self):
+        grupos = group_by_continuation([
+            PageText(0, "ALBARAN: A6-004664 FECHA: 05/08/2026 Pag. 1 de 2\nGOURMET ARRAY SL"),
+            PageText(1, "lineas de detalle sin identidad propia"),
+        ])
+        assert [g.indices for g in grupos] == [[0, 1]]
+
+    def test_se_cierra_al_llegar_a_su_ultima_hoja(self):
+        grupos = group_by_continuation([
+            PageText(0, "ALBARAN: A6-004664 Pag. 1 de 2\nGOURMET ARRAY SL"),
+            PageText(1, "Pag. 2 de 2 detalle y total"),
+            PageText(2, "hoja ilegible que ya no le pertenece"),
+        ])
+        assert [g.indices for g in grupos] == [[0, 1], [2]]

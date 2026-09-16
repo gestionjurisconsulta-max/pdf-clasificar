@@ -26,6 +26,8 @@ export interface PageIdentity {
   cifs: string[];
   /** Número de hoja si la página lo dice explícitamente ("Página 2 de 3"). */
   pageMarker: number | null;
+  /** El total de "Pág. 2 DE 3": permite cerrar el documento en su última hoja. */
+  pageTotal: number | null;
   saysContinuation: boolean;
   isBlank: boolean;
 }
@@ -55,6 +57,7 @@ export const readPageIdentity = (
     invoiceNumber: extractInvoiceNumber(text, invoicePattern),
     cifs: readCifs(text, cifPattern),
     pageMarker: marker ? Number(marker[1]) : null,
+    pageTotal: marker ? Number(marker[2]) : null,
     saysContinuation: CONTINUATION_WORDS.test(text),
     isBlank: text.trim().length < BLANK_THRESHOLD
   };
@@ -73,6 +76,21 @@ export interface ContinuationVerdict {
 export const isContinuation = (page: PageIdentity, current: PageIdentity | null): ContinuationVerdict => {
   if (!current) {
     return { continuation: false, reason: 'es la primera página del lote' };
+  }
+
+  // El documento anterior declaró cuántas hojas tenía y ya las tiene todas
+  // ("Pág. 1 de 1", "Pág. 3 de 3"). Nada que venga después le pertenece.
+  // Es la regla que protege de un OCR malo: se apoya en la hoja que SÍ se leyó
+  // bien, en vez de depender de que la siguiente se lea bien.
+  if (
+    current.pageMarker !== null &&
+    current.pageTotal !== null &&
+    current.pageMarker >= current.pageTotal
+  ) {
+    return {
+      continuation: false,
+      reason: `el documento anterior ya estaba completo (pág. ${current.pageMarker} de ${current.pageTotal})`
+    };
   }
 
   if (page.pageMarker === 1) {
@@ -155,6 +173,7 @@ export const groupByContinuation = (
         invoiceNumber: open.identity.invoiceNumber || identity.invoiceNumber,
         cifs: [...new Set([...open.identity.cifs, ...identity.cifs])],
         pageMarker: identity.pageMarker,
+        pageTotal: identity.pageTotal,
         saysContinuation: identity.saysContinuation,
         isBlank: false
       };

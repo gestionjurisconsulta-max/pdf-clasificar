@@ -31,6 +31,9 @@ class PageIdentity:
     number: str = ""
     cifs: list[str] = field(default_factory=list)
     page_marker: int | None = None
+    #: El total de "Pág. 2 DE 3". Saber cuántas hojas tiene el documento es lo
+    #: que permite cerrarlo cuando llega a la última.
+    page_total: int | None = None
     says_continuation: bool = False
     is_blank: bool = False
     doc_type: DocumentType = DocumentType.DESCONOCIDO
@@ -62,6 +65,7 @@ def read_page_identity(
         number=extract_invoice_number(text, invoice_pattern),
         cifs=_read_cifs(text, cif_pattern),
         page_marker=int(marker.group(1)) if marker else None,
+        page_total=int(marker.group(2)) if marker else None,
         says_continuation=bool(_CONTINUATION_WORDS.search(normalize(text))),
         is_blank=len((text or "").strip()) < BLANK_THRESHOLD,
         doc_type=detect_document_type(text).doc_type,
@@ -86,6 +90,21 @@ def is_continuation(page: PageIdentity, current: PageIdentity | None) -> Verdict
         and page.doc_type is not current.doc_type
     ):
         return Verdict(False, f"cambia el tipo de documento a {page.doc_type.value}")
+
+    # El documento anterior declaró cuántas hojas tenía y ya las tiene todas
+    # ("Pág. 1 de 1", "Pág. 3 de 3"). Nada que venga después le pertenece.
+    # Es la regla que protege de un OCR malo: se apoya en la hoja que SÍ se leyó
+    # bien en vez de depender de que la siguiente se lea bien.
+    if (
+        current.page_marker is not None
+        and current.page_total is not None
+        and current.page_marker >= current.page_total
+    ):
+        return Verdict(
+            False,
+            f"el documento anterior ya estaba completo (pág. {current.page_marker}"
+            f" de {current.page_total})",
+        )
 
     if page.page_marker == 1:
         return Verdict(False, "la página dice ser la nº 1")
@@ -169,6 +188,7 @@ def group_by_continuation(
                 number=merged.number or identity.number,
                 cifs=merged.cifs + [c for c in identity.cifs if c not in merged.cifs],
                 page_marker=identity.page_marker,
+                page_total=identity.page_total,
                 says_continuation=identity.says_continuation,
                 is_blank=False,
                 doc_type=merged.doc_type

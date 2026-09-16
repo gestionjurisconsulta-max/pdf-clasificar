@@ -133,3 +133,43 @@ describe('groupByContinuation', () => {
     expect(grupos.map(g => g.indices)).toEqual([[0, 1, 2]]);
   });
 });
+
+describe('documentos que se declaran completos', () => {
+  // Caso real: un albarán de una hoja ("Pág. 1 de 1") seguido de la factura de
+  // OTRO cliente. Si el OCR de la segunda hoja falla, sin esta regla la hoja
+  // parecería "sin identidad propia" y se pegaría al albarán anterior.
+  const ALBARAN_COMPLETO = 'RUIBAL LOSADA CIF A59191197\nALBARAN: A6-004757 FECHA: 10/08/2026 Pag. 1 de 1\nLA CASA ALIMENT SL NIF: B67825950';
+
+  it('no admite más hojas tras un "Pág. 1 de 1"', () => {
+    const grupos = groupByContinuation([
+      { index: 0, text: ALBARAN_COMPLETO },
+      { index: 1, text: 'hoja cuyo OCR no ha dejado nada reconocible aqui' }
+    ]);
+    expect(grupos.map(g => g.indices)).toEqual([[0], [1]]);
+  });
+
+  it('tampoco si la hoja siguiente sale completamente ilegible', () => {
+    const grupos = groupByContinuation([
+      { index: 0, text: ALBARAN_COMPLETO },
+      { index: 1, text: '' }
+    ]);
+    expect(grupos.map(g => g.indices)).toEqual([[0], [1]]);
+  });
+
+  it('pero un "Pág. 1 de 2" sí espera su segunda hoja', () => {
+    const grupos = groupByContinuation([
+      { index: 0, text: 'ALBARAN: A6-004664 FECHA: 05/08/2026 Pag. 1 de 2\nGOURMET ARRAY SL' },
+      { index: 1, text: 'lineas de detalle sin identidad propia' }
+    ]);
+    expect(grupos.map(g => g.indices)).toEqual([[0, 1]]);
+  });
+
+  it('y se cierra al llegar a su última hoja', () => {
+    const grupos = groupByContinuation([
+      { index: 0, text: 'ALBARAN: A6-004664 Pag. 1 de 2\nGOURMET ARRAY SL' },
+      { index: 1, text: 'Pag. 2 de 2 detalle y total' },
+      { index: 2, text: 'hoja ilegible que ya no le pertenece' }
+    ]);
+    expect(grupos.map(g => g.indices)).toEqual([[0, 1], [2]]);
+  });
+});
