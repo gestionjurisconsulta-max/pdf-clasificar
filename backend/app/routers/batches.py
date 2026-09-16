@@ -123,6 +123,7 @@ def get_batch(batch_id: int, session: Session = Depends(get_session)) -> BatchDe
     documents = [
         DocumentOut(
             id=d.id,
+            source_file_id=d.source_file_id,
             doc_type=d.doc_type,
             number=d.number,
             page_indices=d.page_indices,

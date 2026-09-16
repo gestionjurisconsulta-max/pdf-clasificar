@@ -7,14 +7,20 @@ import {
   type Batch,
   type BatchDetail,
   type ImportResult,
+  type DocumentType,
   batchDownloadUrl,
   createBatch,
   getBatch,
   importClients,
   listBatches,
-  listClients
+  listClients,
+  mergeNextDocument,
+  pageImageUrl,
+  splitDocument,
+  updateDocument
 } from './services/apiClient';
 import { APP_VERSION } from './constants';
+import DocumentCard from './components/DocumentCard';
 
 interface ServerWorkspaceProps {
   modeSwitch?: React.ReactNode;
@@ -37,12 +43,6 @@ const STATUS_STYLE: Record<Batch['status'], string> = {
   fallido: 'bg-red-50 text-red-700 border border-red-200'
 };
 
-const TYPE_STYLE: Record<ApiDocument['doc_type'], string> = {
-  factura: 'bg-indigo-50 text-indigo-700',
-  albaran: 'bg-teal-50 text-teal-700',
-  desconocido: 'bg-slate-100 text-slate-500'
-};
-
 const ServerWorkspace: React.FC<ServerWorkspaceProps> = ({ modeSwitch }) => {
   const [tab, setTab] = useState<Tab>('clientes');
   const [error, setError] = useState<string | null>(null);
@@ -57,6 +57,10 @@ const ServerWorkspace: React.FC<ServerWorkspaceProps> = ({ modeSwitch }) => {
   const [detail, setDetail] = useState<BatchDetail | null>(null);
   const [uploading, setUploading] = useState(false);
   const [batchName, setBatchName] = useState('');
+  // Documento sobre el que hay una corrección en vuelo: bloquea su tarjeta para
+  // que dos clics seguidos no se pisen.
+  const [busyDoc, setBusyDoc] = useState<number | null>(null);
+  const [zoom, setZoom] = useState<{ sourceId: number; pageIndex: number } | null>(null);
 
   const refreshClients = useCallback(async (term: string) => {
     try {
@@ -174,9 +178,49 @@ const ServerWorkspace: React.FC<ServerWorkspaceProps> = ({ modeSwitch }) => {
     }
   };
 
+  /**
+   * Toda corrección acaba releyendo el lote entero en vez de parchear el
+   * documento en memoria: partir y unir cambian cuántos documentos hay, y el
+   * resumen (pendientes, ambiguos) depende del conjunto. Un lote son unas
+   * decenas de documentos, así que releerlo es barato y no deja la pantalla
+   * desincronizada del servidor.
+   */
+  const applyCorrection = async (documentId: number, action: () => Promise<unknown>) => {
+    if (selectedId === null) return;
+    setBusyDoc(documentId);
+    try {
+      await action();
+      setDetail(await getBatch(selectedId));
+      setError(null);
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setBusyDoc(null);
+    }
+  };
+
+  const handleUpdateDoc = (
+    id: number,
+    update: { client_id?: number; doc_type?: DocumentType; clear_client?: boolean }
+  ) => void applyCorrection(id, () => updateDocument(id, update));
+
+  const handleSplit = (id: number, atPage: number) =>
+    void applyCorrection(id, () => splitDocument(id, atPage));
+
+  const handleMergeNext = (id: number) =>
+    void applyCorrection(id, () => mergeNextDocument(id));
+
   const progress = detail && detail.pages_total > 0
     ? Math.round((detail.pages_done / detail.pages_total) * 100)
     : 0;
+
+  // Sólo se puede unir con el siguiente si hay otro documento después dentro
+  // del MISMO PDF de origen.
+  const canMergeNext = (doc: ApiDocument): boolean => {
+    if (!detail) return false;
+    const hermanos = detail.documents.filter(d => d.source_file_id === doc.source_file_id);
+    return hermanos[hermanos.length - 1]?.id !== doc.id;
+  };
 
   return (
     <div className="min-h-screen bg-[#f1f5f9] flex flex-col h-screen overflow-hidden text-slate-900">
@@ -401,33 +445,26 @@ const ServerWorkspace: React.FC<ServerWorkspaceProps> = ({ modeSwitch }) => {
 
                   {detail.documents.length > 0 && (
                     <div className="bg-white p-6 rounded-[2rem] shadow-sm border border-slate-100 space-y-2">
-                      <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-3">
-                        {detail.documents.length} documentos detectados
-                      </h3>
+                      <div className="flex flex-wrap justify-between items-baseline gap-2 mb-3">
+                        <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-500">
+                          {detail.documents.length} documentos detectados
+                        </h3>
+                        <p className="text-[9px] font-bold text-slate-400">
+                          Pulsa el número de páginas para verlas y corregir el troceado.
+                        </p>
+                      </div>
                       {detail.documents.map(doc => (
-                        <div key={doc.id} className="p-4 rounded-2xl bg-slate-50 border border-slate-100 space-y-1">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <span className={`text-[8px] font-black uppercase px-2 py-1 rounded-md ${TYPE_STYLE[doc.doc_type]}`}>
-                              {doc.doc_type}
-                            </span>
-                            <span className="text-[11px] font-black font-mono">{doc.number || 'S-N'}</span>
-                            <span className="text-[9px] font-bold text-slate-400">
-                              pág. {doc.page_indices.map(i => i + 1).join(' + ')}
-                            </span>
-                            <span className={`ml-auto text-[10px] font-black truncate ${doc.client_name ? 'text-green-700' : 'text-amber-700'}`}>
-                              {doc.client_name ?? 'Pendiente de asignar'}
-                            </span>
-                          </div>
-                          {doc.ambiguous && (
-                            <p className="text-[9px] font-bold text-amber-700">
-                              <i className="fas fa-circle-question mr-1"></i>
-                              Ambiguo: coinciden {doc.candidates.join(' / ')}. Decide tú.
-                            </p>
-                          )}
-                          {doc.notes.map((n, i) => (
-                            <p key={i} className="text-[9px] font-bold text-slate-400">{n}</p>
-                          ))}
-                        </div>
+                        <DocumentCard
+                          key={doc.id}
+                          document={doc}
+                          clients={clients}
+                          canMergeNext={canMergeNext(doc)}
+                          busy={busyDoc === doc.id}
+                          onUpdate={handleUpdateDoc}
+                          onSplit={handleSplit}
+                          onMergeNext={handleMergeNext}
+                          onZoom={(sourceId, pageIndex) => setZoom({ sourceId, pageIndex })}
+                        />
                       ))}
                     </div>
                   )}
@@ -437,6 +474,28 @@ const ServerWorkspace: React.FC<ServerWorkspaceProps> = ({ modeSwitch }) => {
           </div>
         )}
       </main>
+
+      {zoom && (
+        <div
+          className="fixed inset-0 z-[100] bg-slate-950/90 backdrop-blur-md flex items-center justify-center p-4"
+          onClick={() => setZoom(null)}
+        >
+          <div className="relative max-h-full" onClick={e => e.stopPropagation()}>
+            <button
+              onClick={() => setZoom(null)}
+              className="absolute -top-3 -right-3 w-9 h-9 bg-white rounded-full shadow-xl text-slate-400 hover:text-red-600 z-10"
+            >
+              <i className="fas fa-times"></i>
+            </button>
+            {/* El backend rasteriza a más resolución cuando se pide con zoom. */}
+            <img
+              src={pageImageUrl(zoom.sourceId, zoom.pageIndex, true)}
+              alt={`Página ${zoom.pageIndex + 1}`}
+              className="max-h-[92vh] w-auto rounded-xl shadow-2xl bg-white"
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 };

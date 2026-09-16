@@ -17,25 +17,16 @@ from ..config import Settings
 from ..enums import BatchStatus, DocumentType
 from ..models import Batch, Client, Document, SourceFile
 from . import pdf as pdf_service
+from . import storage
 from .continuation import PageText, group_by_continuation
 from .matching import Company, find_matching_company
-from .naming import sanitize_name
 
 logger = logging.getLogger(__name__)
-
-PENDING_FOLDER = "Pendiente de asignar"
 
 
 def _load_companies(session: Session) -> list[Company]:
     rows = session.execute(select(Client)).scalars().all()
     return [Company(cif=c.cif, name=c.name, id=c.id) for c in rows]
-
-
-def _folder_for(doc_type: DocumentType, client_name: str | None) -> str:
-    """Los albaranes van a su propia rama para que no se mezclen con la
-    facturación: era el motivo de separarlos."""
-    base = "Albaranes" if doc_type is DocumentType.ALBARAN else "Facturas"
-    return f"{base}/{sanitize_name(client_name) if client_name else PENDING_FOLDER}"
 
 
 def process_batch(session: Session, batch_id: int, settings: Settings) -> None:
@@ -54,8 +45,6 @@ def process_batch(session: Session, batch_id: int, settings: Settings) -> None:
             select(SourceFile).where(SourceFile.batch_id == batch_id).order_by(SourceFile.id)
         ).scalars().all()
 
-        out_root = settings.documents_dir / f"batch-{batch_id}"
-
         for source in sources:
             source_path = Path(source.stored_path)
             texts = pdf_service.extract_text_per_page(source_path, settings.ocr_language)
@@ -70,31 +59,22 @@ def process_batch(session: Session, batch_id: int, settings: Settings) -> None:
                 joined = "\n".join(texts[i] for i in group.indices)
                 match = find_matching_company(joined, companies)
 
-                client_id = match.company.id if match.company else None
-                client_name = match.company.name if match.company else None
-
-                number = sanitize_name(group.number) if group.number else "S-N"
-                folder = _folder_for(group.doc_type, client_name)
-                stem = sanitize_name(Path(source.filename).stem)
-                filename = f"PAG_{group.indices[0] + 1:03d}_{stem}_{number}.pdf"
-                destination = out_root / folder / filename
-
-                pdf_service.extract_pages(source_path, group.indices, destination)
-
-                session.add(
-                    Document(
-                        batch_id=batch_id,
-                        source_file_id=source.id,
-                        client_id=client_id,
-                        doc_type=group.doc_type,
-                        number=group.number or "",
-                        page_indices=group.indices,
-                        ambiguous=match.ambiguous,
-                        candidates=[c.name for c in match.candidates],
-                        notes=group.notes,
-                        stored_path=str(destination),
-                    )
+                document = Document(
+                    batch_id=batch_id,
+                    source_file_id=source.id,
+                    client_id=match.company.id if match.company else None,
+                    doc_type=group.doc_type,
+                    number=group.number or "",
+                    page_indices=group.indices,
+                    ambiguous=match.ambiguous,
+                    candidates=[c.name for c in match.candidates],
+                    notes=group.notes,
+                    stored_path="",
                 )
+                storage.write_document(
+                    document, source, match.company.name if match.company else None, settings
+                )
+                session.add(document)
 
                 batch.pages_done += len(group.indices)
                 session.commit()

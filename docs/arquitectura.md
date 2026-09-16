@@ -83,8 +83,37 @@ la base de datos, que es la parte difícil.
 | POST | `/api/batches` | Sube uno o varios PDF y arranca el proceso |
 | GET | `/api/batches/{id}` | Estado, documentos detectados y resumen |
 | GET | `/api/batches/{id}/download` | ZIP del lote |
+| GET | `/api/sources/{id}/pages/{n}/image` | Imagen de una página; `?zoom=true` la da a más resolución |
+| PATCH | `/api/documents/{id}` | Corrige cliente, tipo o número |
+| POST | `/api/documents/{id}/split` | Parte el documento por una página |
+| POST | `/api/documents/{id}/merge-next` | Lo une con el siguiente del mismo PDF |
 
 Documentación interactiva en `/api/docs` (la genera FastAPI).
+
+## Revisar y corregir un lote
+
+La detección automática acierta la mayoría de las veces, pero no siempre, y una
+factura en la carpeta equivocada cuesta más que el rato que ahorra. Por eso todo
+lo que decide el pipeline se puede corregir después:
+
+- **Cambiar el cliente** de un documento, o dejarlo pendiente.
+- **Cambiar el tipo** entre factura y albarán.
+- **Partir** un documento por una página, cuando la detección unió dos que no
+  iban juntos.
+- **Unir** un documento con el siguiente del mismo PDF, cuando una hoja de
+  continuación quedó suelta.
+
+Cada corrección **regenera el PDF** en la carpeta que le toca y borra el
+anterior: sin eso, cambiar el cliente de una factura dejaba una copia huérfana
+en la carpeta de antes y el ZIP salía con el documento duplicado. Si la carpeta
+anterior se queda vacía, se elimina.
+
+Las páginas se ven como miniaturas servidas por
+`/api/sources/{id}/pages/{n}/image`, que se rasterizan bajo demanda y se
+cachean en disco. Una página de un PDF ya subido no cambia nunca, así que se
+sirven con `Cache-Control: immutable`.
+
+Corregir el cliente a mano quita la marca de ambiguo: la duda ya está resuelta.
 
 ## Cómo distinguir una factura de un albarán
 

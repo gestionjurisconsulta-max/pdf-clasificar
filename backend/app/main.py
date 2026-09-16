@@ -6,7 +6,7 @@ from sqlalchemy import text
 
 from .config import get_settings
 from .db import engine
-from .routers import batches, clients
+from .routers import batches, clients, documents, sources
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
@@ -44,3 +44,5 @@ def health_check() -> dict[str, str]:
 app.include_router(health)
 app.include_router(clients.router)
 app.include_router(batches.router)
+app.include_router(documents.router)
+app.include_router(sources.router)

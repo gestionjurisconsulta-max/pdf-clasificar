@@ -40,6 +40,8 @@ export interface SourceFile {
 
 export interface ApiDocument {
   id: number;
+  /** PDF del que salió: hace falta para pedir las miniaturas de sus páginas. */
+  source_file_id: number;
   doc_type: DocumentType;
   number: string;
   page_indices: number[];
@@ -140,3 +142,35 @@ export const getBatch = (id: number): Promise<BatchDetail> =>
 
 /** El navegador descarga el ZIP directamente de esta URL. */
 export const batchDownloadUrl = (id: number): string => `/api/batches/${id}/download`;
+
+/** La imagen de una página del PDF original. La sirve el backend y la cachea
+ *  el navegador: una página ya subida no cambia nunca. */
+export const pageImageUrl = (sourceId: number, pageIndex: number, zoom = false): string =>
+  `/api/sources/${sourceId}/pages/${pageIndex}/image${zoom ? '?zoom=true' : ''}`;
+
+export interface DocumentUpdate {
+  client_id?: number;
+  doc_type?: DocumentType;
+  number?: string;
+  /** Dejar el documento sin cliente. Es distinto de no tocar el campo. */
+  clear_client?: boolean;
+}
+
+export const updateDocument = (id: number, update: DocumentUpdate): Promise<ApiDocument> =>
+  request<ApiDocument>(`/api/documents/${id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(update)
+  });
+
+/** Parte el documento en dos: `atPage` (índice en el PDF original) abre el nuevo. */
+export const splitDocument = (id: number, atPage: number): Promise<ApiDocument[]> =>
+  request<ApiDocument[]>(`/api/documents/${id}/split`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ at_page: atPage })
+  });
+
+/** Absorbe el documento siguiente del mismo PDF. */
+export const mergeNextDocument = (id: number): Promise<ApiDocument> =>
+  request<ApiDocument>(`/api/documents/${id}/merge-next`, { method: 'POST' });

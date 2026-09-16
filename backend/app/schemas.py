@@ -41,6 +41,7 @@ class DocumentOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
+    source_file_id: int
     doc_type: DocumentType
     number: str
     page_indices: list[int]

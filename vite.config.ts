@@ -183,16 +183,22 @@ export default defineConfig(({ mode }) => {
     // lo hace Vite, así que el código del navegador usa rutas relativas en los
     // dos casos y no hay ninguna URL de servidor en el build.
     //
-    // Se enrutan las rutas UNA A UNA en lugar de todo `/api`: el plugin
-    // gemini-proxy atiende /api/analyze-invoice dentro de este mismo servidor,
-    // y un proxy genérico se lo llevaría al backend de Python, que no lo tiene.
+    // Se proxea TODO `/api` con una excepción, en vez de enrutar las rutas una
+    // a una: con una lista explícita, cada endpoint nuevo del backend devuelve
+    // 404 en desarrollo hasta que alguien se acuerda de añadirlo aquí.
+    //
+    // La excepción es /api/analyze-invoice, que lo atiende el plugin
+    // gemini-proxy dentro de este mismo servidor. `bypass` devolviendo la url
+    // salta el proxy y deja que siga la cadena de middlewares hasta él.
     const apiTarget = env.API_PROXY_TARGET || 'http://localhost:8080';
-    const proxy = Object.fromEntries(
-      ['/api/health', '/api/clients', '/api/batches'].map((route) => [
-        route,
-        { target: apiTarget, changeOrigin: true }
-      ])
-    );
+    const proxy = {
+      '/api': {
+        target: apiTarget,
+        changeOrigin: true,
+        bypass: (req: { url?: string }) =>
+          req.url?.startsWith('/api/analyze-invoice') ? req.url : undefined
+      }
+    };
 
     return {
       server: {
