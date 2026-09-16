@@ -42,6 +42,29 @@ docker compose up -d --build
 La aplicación queda en http://localhost:8080 y la API en
 http://localhost:8080/api (documentación interactiva en `/api/docs`).
 
+El puerto sólo escucha en la interfaz local. Para abrirlo a tu red, pon
+`HTTP_BIND=0.0.0.0` en `.env`.
+
+## Desplegar en el VPS
+
+El proyecto vive en `/opt/pdf-clasificar` y se publica en
+**https://gestion.pdf.iages.es** a través del nginx del host. Está pensado para
+convivir con otros proyectos en la misma máquina: no expone ningún puerto al
+exterior, los volúmenes y contenedores van prefijados con el nombre del
+proyecto, y hay techo de CPU, memoria y logs.
+
+```bash
+sudo git clone https://github.com/gestionjurisconsulta-max/pdf-clasificar.git /opt/pdf-clasificar
+```
+
+```bash
+cd /opt/pdf-clasificar && cp .env.example .env && ./scripts/deploy.sh
+```
+
+El mismo comando sirve para actualizar. Los pasos completos —certificado,
+vhost, cortafuegos y qué mirar cuando algo falla— están en
+[docs/despliegue.md](docs/despliegue.md).
+
 ## Cómo funciona
 
 1. **Clientes** — subes un Excel con la lista de clientes. La primera hoja debe

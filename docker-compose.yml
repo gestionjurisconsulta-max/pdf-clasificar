@@ -1,9 +1,19 @@
 name: pdf-clasificar
 
+# Rotación de logs, compartida por los tres servicios. Sin un tope, los ficheros
+# de log de Docker crecen sin límite y en un VPS con varios proyectos acaban
+# llenando el disco de todos, no sólo el de éste.
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   db:
     image: postgres:15-alpine
     restart: unless-stopped
+    logging: *logging
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-pdfclasificar}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?define POSTGRES_PASSWORD en .env}
@@ -20,11 +30,16 @@ services:
       start_period: 10s
     # Sin puertos publicados: sólo se llega a la base de datos desde la red
     # interna de compose. Para depurar desde fuera, usa un túnel SSH al VPS.
+    deploy:
+      resources:
+        limits:
+          memory: ${DB_MEMORY:-512m}
 
   backend:
     build:
       context: ./backend
     restart: unless-stopped
+    logging: *logging
     depends_on:
       db:
         condition: service_healthy
@@ -42,17 +57,32 @@ services:
       timeout: 10s
       retries: 5
       start_period: 40s
+    # El OCR es lo único de esta pila que puede comerse la máquina entera. El
+    # tope evita que un lote grande deje sin CPU ni memoria a los demás
+    # proyectos del VPS. Rasteriza página a página a 200 dpi, así que con 2 GB
+    # va sobrado; súbelo en .env si ves al contenedor morir por OOM.
+    deploy:
+      resources:
+        limits:
+          cpus: "${BACKEND_CPUS:-2}"
+          memory: ${BACKEND_MEMORY:-2g}
 
   frontend:
     build:
       context: .
     restart: unless-stopped
+    logging: *logging
     depends_on:
       - backend
     ports:
-      # En el VPS, pon delante un proxy con TLS (Caddy o Traefik) y deja este
-      # puerto sólo en la interfaz local: "127.0.0.1:8080:80".
-      - "${HTTP_PORT:-8080}:80"
+      # Por defecto sólo escucha en la interfaz local: en el VPS quien publica
+      # la aplicación es el nginx del host, que hace de proxy con TLS hacia
+      # este puerto. Para abrirlo a la red, pon HTTP_BIND=0.0.0.0 en .env.
+      - "${HTTP_BIND:-127.0.0.1}:${HTTP_PORT:-8080}:80"
+    deploy:
+      resources:
+        limits:
+          memory: ${FRONTEND_MEMORY:-256m}
 
 volumes:
   db-data:

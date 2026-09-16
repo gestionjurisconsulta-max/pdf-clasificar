@@ -172,19 +172,20 @@ aunque la segunda hoja no tenga identidad propia.
 
 ## Despliegue en el VPS
 
-```bash
-git clone <repo> && cd pdf-clasificar
-cp .env.example .env
-# rellena POSTGRES_PASSWORD
-docker compose up -d --build
-```
+El proyecto vive en `/opt/pdf-clasificar` y se publica en
+`https://gestion.pdf.iages.es` a través del nginx del host. El procedimiento
+completo está en [despliegue.md](despliegue.md); aquí sólo el porqué de las
+decisiones que afectan a la arquitectura:
 
-Recomendaciones para producción:
-
-- Publica el puerto sólo en local (`"127.0.0.1:8080:80"` en
-  `docker-compose.yml`) y pon delante Caddy o Traefik para el TLS. **La API no
-  tiene autenticación**: expuesta a internet, cualquiera podría subir ficheros
-  y descargar los lotes.
+- **Nada escucha fuera de la máquina.** `frontend` publica en
+  `${HTTP_BIND:-127.0.0.1}`, y `backend` y `db` no publican puerto alguno. Quien
+  habla con internet es el nginx del host, que además pone el TLS.
+- **La API no tiene autenticación.** El aislamiento por sesión evita que dos
+  personas se vean entre sí, pero no impide que un tercero use el servicio. Si
+  el subdominio no debe estar abierto, el vhost admite `auth_basic`.
+- **Techo de CPU, memoria y logs.** El VPS aloja otros proyectos, y el OCR es lo
+  único de esta pila capaz de comerse la máquina entera. Los límites están en
+  `docker-compose.yml` y se ajustan desde `.env`.
 - **No hace falta copia de seguridad**: no hay nada que conservar. Los datos
   viven lo que dura un trabajo. Lo único que conviene vigilar es que el volumen
   `storage` no crezca, y de eso se encarga el barrido de trabajos abandonados.
