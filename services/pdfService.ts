@@ -1,8 +1,6 @@
 
-import { PDFDocument, degrees } from 'pdf-lib';
+
 import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
-// @ts-ignore
-import Tesseract from 'tesseract.js';
 
 // Servidos por el plugin `pdfjs-assets` de vite.config.ts. Sin `wasmUrl` pdf.js
 // no puede decodificar imágenes CCITT/JBIG2 y los PDF de escáner se renderizan
@@ -15,6 +13,14 @@ const PDFJS_ASSETS = '/pdfjs-assets/';
 // pdf.js activa el "fake worker" (que reimporta el mismo fichero y vuelve a
 // fallar) y `getDocument()` se queda colgado para siempre sin lanzar error.
 pdfjs.GlobalWorkerOptions.workerSrc = `${PDFJS_ASSETS}pdf.worker.min.js`;
+
+export interface RenderOptions {
+  scale?: number;
+  /** 'image/jpeg' pesa ~10x menos que PNG: obligatorio para las miniaturas. */
+  mimeType?: 'image/png' | 'image/jpeg';
+  /** Sólo aplica a JPEG (0-1). */
+  quality?: number;
+}
 
 export const loadPdfDocument = async (file: File): Promise<pdfjs.PDFDocumentProxy> => {
   const arrayBuffer = await file.arrayBuffer();
@@ -33,7 +39,13 @@ export const getPageCount = async (file: File): Promise<number> => {
   return pdf.numPages;
 };
 
-export const pdfPageToImage = async (fileOrDoc: File | pdfjs.PDFDocumentProxy, pageIndex: number): Promise<string> => {
+export const pdfPageToImage = async (
+  fileOrDoc: File | pdfjs.PDFDocumentProxy,
+  pageIndex: number,
+  options: RenderOptions = {}
+): Promise<string> => {
+  const { scale = 1.5, mimeType = 'image/png', quality = 0.75 } = options;
+
   let pdf: pdfjs.PDFDocumentProxy;
   if (fileOrDoc instanceof File) {
     pdf = await loadPdfDocument(fileOrDoc);
@@ -41,11 +53,11 @@ export const pdfPageToImage = async (fileOrDoc: File | pdfjs.PDFDocumentProxy, p
     pdf = fileOrDoc;
   }
   const page = await pdf.getPage(pageIndex + 1);
-  
-  const viewport = page.getViewport({ scale: 1.5 });
+
+  const viewport = page.getViewport({ scale });
   const canvas = document.createElement('canvas');
   const context = canvas.getContext('2d');
-  
+
   if (!context) throw new Error("Canvas error");
 
   canvas.height = Math.floor(viewport.height);
@@ -66,7 +78,13 @@ export const pdfPageToImage = async (fileOrDoc: File | pdfjs.PDFDocumentProxy, p
     intent: 'print',
   }).promise;
 
-  const dataUrl = canvas.toDataURL('image/png');
+  const dataUrl = canvas.toDataURL(mimeType, quality);
+
+  // Libera el bitmap del canvas de inmediato: con PDFs de cientos de páginas,
+  // dejarlo al criterio del GC dispara el uso de memoria de la pestaña.
+  canvas.width = 0;
+  canvas.height = 0;
+
   return dataUrl;
 };
 
@@ -76,31 +94,19 @@ export const extractTextLocally = async (fileOrDoc: File | pdfjs.PDFDocumentProx
   const textContent = await page.getTextContent();
   let text = textContent.items.map((item: any) => item.str).join(' ');
 
-  // Si no hay texto (es una imagen/escáner), aplicamos OCR real
+  // Si no hay texto (es una imagen/escáner), aplicamos OCR real.
+  // Tesseract se importa aquí y no arriba: son ~900 KB que sólo hacen falta
+  // con PDF escaneados, y así no lastran la carga inicial de la app.
   if (!text.trim() || text.length < 10) {
+    const { default: Tesseract } = await import('tesseract.js');
     const imageUri = await pdfPageToImage(pdf, pageIndex);
     const { data: { text: ocrText } } = await Tesseract.recognize(
       imageUri,
       'spa',
-      { logger: m => console.log(m) }
+      { logger: (m: unknown) => console.log(m) }
     );
     text = ocrText;
   }
-  
-  return text;
-};
 
-export const createMergedPdf = async (originalPdfBuffer: ArrayBuffer, pages: { index: number; rotation: number }[]): Promise<Uint8Array> => {
-  const sourcePdf = await PDFDocument.load(originalPdfBuffer);
-  const newPdf = await PDFDocument.create();
-  
-  for (const p of pages) {
-    const [copiedPage] = await newPdf.copyPages(sourcePdf, [p.index]);
-    if (p.rotation) {
-      copiedPage.setRotation(degrees(p.rotation));
-    }
-    newPdf.addPage(copiedPage);
-  }
-  
-  return await newPdf.save();
+  return text;
 };

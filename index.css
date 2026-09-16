@@ -1,1 +1,5 @@
 @import "tailwindcss";
+
+/* Servido desde node_modules en vez de un CDN: la app declara funcionar sin
+   conexión externa y un CDN caído dejaba la interfaz entera sin iconos. */
+@import "@fortawesome/fontawesome-free/css/all.min.css";

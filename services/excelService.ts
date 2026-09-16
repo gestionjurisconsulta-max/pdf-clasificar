@@ -2,69 +2,88 @@
 import * as XLSX from 'xlsx';
 import { Company } from '../types';
 
-export const parseExcelDatabase = async (file: File): Promise<Company[]> => {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      try {
-        const data = new Uint8Array(e.target?.result as ArrayBuffer);
-        const workbook = XLSX.read(data, { type: 'array' });
-        const firstSheetName = workbook.SheetNames[0];
-        const worksheet = workbook.Sheets[firstSheetName];
-        
-        const jsonData = XLSX.utils.sheet_to_json(worksheet, { defval: '' }) as any[];
+type Row = Record<string, unknown>;
 
-        if (!jsonData || jsonData.length === 0) {
-          resolve([]);
-          return;
-        }
+const CIF_REGEX = /[ABCDEFGHJNPQRSUVW0-9][0-9]{7}[0-9A-J]/i;
 
-        const keys = Object.keys(jsonData[0]);
-        
-        // 1. Detectar columna CIF por nombres de cabecera
-        let cifKey = keys.find(k => {
-          const kl = k.toLowerCase().trim();
-          return kl === 'cif' || kl === 'nif' || kl.includes('cif') || kl.includes('nif') || kl.includes('identif') || kl.includes('vat') || kl.includes('tax') || kl === 'b';
-        });
-        
-        // 2. Detectar columna Nombre por nombres de cabecera
-        let nameKey = keys.find(k => {
-          const kl = k.toLowerCase().trim();
-          return kl.includes('empresa') || kl.includes('nombre') || kl.includes('cliente') || kl.includes('razon') || kl.includes('social') || kl.includes('denominacion') || kl.includes('proveedor') || kl.includes('titular') || kl === 'a';
-        });
+const matchesCifHeader = (header: string): boolean => {
+  const h = header.toLowerCase().trim();
+  return h === 'cif' || h === 'nif' || h === 'b'
+    || h.includes('cif') || h.includes('nif')
+    || h.includes('identif') || h.includes('vat') || h.includes('tax');
+};
 
-        // 3. Fallback por inspección de contenido (CIF regex)
-        const cifRegex = /[ABCDEFGHJNPQRSUVW0-9][0-9]{7}[0-9A-J]/i;
-        if (!cifKey) {
-          for (const key of keys) {
-            const sampleValues = jsonData.slice(0, 10).map(r => String(r[key]).replace(/[^A-Z0-9]/gi, ''));
-            if (sampleValues.some(v => cifRegex.test(v) && v.length >= 8)) {
-              cifKey = key;
-              break;
-            }
-          }
-        }
+const matchesNameHeader = (header: string): boolean => {
+  const h = header.toLowerCase().trim();
+  return h === 'a'
+    || h.includes('empresa') || h.includes('nombre') || h.includes('cliente')
+    || h.includes('razon') || h.includes('social') || h.includes('denominacion')
+    || h.includes('proveedor') || h.includes('titular');
+};
 
-        if (!cifKey && keys.length >= 2) cifKey = keys[1];
-        if (!nameKey) nameKey = keys.find(k => k !== cifKey) || keys[0];
+/**
+ * Decide qué columnas contienen el CIF y el nombre, en este orden:
+ *   1. Por el nombre de la cabecera.
+ *   2. Si no hay cabecera reconocible, inspeccionando el contenido de las 10
+ *      primeras filas en busca de algo con forma de CIF.
+ *   3. Como último recurso, la segunda columna para el CIF y la primera que no
+ *      sea esa para el nombre. Es una suposición a ciegas: si falla, no se
+ *      producirá ninguna empresa y la UI avisa de que no se ha reconocido nada.
+ */
+export const detectColumns = (rows: Row[]): { cifKey?: string; nameKey?: string } => {
+  if (rows.length === 0) return {};
+  const keys = Object.keys(rows[0]);
 
-        const companies: Company[] = jsonData.map((row: any) => {
-          const rawCif = cifKey ? String(row[cifKey]).trim() : '';
-          const cleanCif = rawCif.replace(/[^A-Z0-9]/gi, '').toUpperCase();
-          const cleanName = nameKey ? String(row[nameKey]).trim() : '';
-          
-          if (cleanCif && cleanName) {
-            return { cif: cleanCif, name: cleanName };
-          }
-          return null;
-        }).filter((c): c is Company => c !== null);
+  let cifKey = keys.find(matchesCifHeader);
+  const nameKey = keys.find(matchesNameHeader);
 
-        resolve(companies);
-      } catch (err) {
-        reject(err);
+  if (!cifKey) {
+    for (const key of keys) {
+      const sampleValues = rows.slice(0, 10).map(r => String(r[key] ?? '').replace(/[^A-Z0-9]/gi, ''));
+      if (sampleValues.some(v => v.length >= 8 && CIF_REGEX.test(v))) {
+        cifKey = key;
+        break;
       }
-    };
-    reader.onerror = reject;
-    reader.readAsArrayBuffer(file);
-  });
+    }
+  }
+
+  if (!cifKey && keys.length >= 2) cifKey = keys[1];
+
+  return {
+    cifKey,
+    nameKey: nameKey ?? keys.find(k => k !== cifKey) ?? keys[0]
+  };
+};
+
+/** Filas ya normalizadas -> empresas. Descarta las que no tengan CIF y nombre. */
+export const parseCompanyRows = (rows: Row[]): Company[] => {
+  const { cifKey, nameKey } = detectColumns(rows);
+
+  return rows.map((row): Company | null => {
+    const rawCif = cifKey ? String(row[cifKey] ?? '').trim() : '';
+    const cleanCif = rawCif.replace(/[^A-Z0-9]/gi, '').toUpperCase();
+    const cleanName = nameKey ? String(row[nameKey] ?? '').trim() : '';
+
+    if (cleanCif && cleanName) {
+      return { cif: cleanCif, name: cleanName };
+    }
+    return null;
+  }).filter((c): c is Company => c !== null);
+};
+
+/** Lee la PRIMERA hoja del libro. Separado de `parseExcelDatabase` para poder
+ *  testear la heurística de columnas sin depender del DOM. */
+export const parseCompaniesFromBuffer = (data: Uint8Array): Company[] => {
+  const workbook = XLSX.read(data, { type: 'array' });
+  const firstSheetName = workbook.SheetNames[0];
+  if (!firstSheetName) return [];
+
+  const worksheet = workbook.Sheets[firstSheetName];
+  const rows = XLSX.utils.sheet_to_json<Row>(worksheet, { defval: '' });
+
+  return parseCompanyRows(rows);
+};
+
+export const parseExcelDatabase = async (file: File): Promise<Company[]> => {
+  return parseCompaniesFromBuffer(new Uint8Array(await file.arrayBuffer()));
 };

@@ -40,11 +40,6 @@ describe('findMatchingCompany', () => {
   });
 
   it('flags ambiguity instead of picking the first match when two companies match the same text', () => {
-    const clashingCompanies: Company[] = [
-      { cif: 'B12345678', name: 'Empresa Uno' },
-      { cif: 'S12345678', name: 'Empresa Clon' } // canonicalForm('S...') === canonicalForm('B...') → 8 vs 5, distinct actually
-    ];
-    // Build a text that contains both companies' digit sequences distinctly.
     const text = 'B12345678 y también S99999999 aparecen aquí';
     const twoDistinctCifs: Company[] = [
       { cif: 'B12345678', name: 'Empresa Uno' },

@@ -30,6 +30,20 @@ const MIME_BY_EXT: Record<string, string> = {
 // para los PDF de escáner), los cmaps y las fuentes estándar. Se sirven desde
 // node_modules para que siempre coincidan con la versión instalada y para que
 // la app funcione sin conexión a un CDN.
+// Se emite dentro de `dist/` para hostings Apache (InfinityFree y similares):
+// fuerza los tipos MIME que su configuración por defecto no conoce y evita que
+// el navegador se quede con un index.html cacheado apuntando a assets viejos.
+const HTACCESS = `AddType text/javascript .js .mjs
+AddType application/wasm .wasm
+AddType application/octet-stream .bcmap .pfb .icc
+
+<IfModule mod_headers.c>
+  <FilesMatch "\\.html$">
+    Header set Cache-Control "no-cache, must-revalidate"
+  </FilesMatch>
+</IfModule>
+`;
+
 function pdfjsAssetsPlugin(): Plugin {
   const require = createRequire(import.meta.url);
   const pdfjsRoot = path.dirname(require.resolve('pdfjs-dist/package.json'));
@@ -59,19 +73,33 @@ function pdfjsAssetsPlugin(): Plugin {
     configurePreviewServer(server) { server.middlewares.use(handler); },
     closeBundle() {
       const assetsOut = path.join(outDir, PDFJS_ASSET_ROUTE.slice(1));
+      fs.mkdirSync(assetsOut, { recursive: true });
       for (const dir of PDFJS_ASSET_DIRS) {
         fs.cpSync(path.join(pdfjsRoot, dir), path.join(assetsOut, dir), { recursive: true });
       }
-      fs.mkdirSync(assetsOut, { recursive: true });
       fs.copyFileSync(path.join(pdfjsRoot, PDFJS_WORKER_SOURCE), path.join(assetsOut, PDFJS_WORKER_FILE));
+      fs.writeFileSync(path.join(outDir, '.htaccess'), HTACCESS);
     }
   };
 }
 
+// Una página renderizada a escala 1.5 en PNG y codificada en base64 ronda 1-3
+// MB. El tope evita que una petición sin fin agote la memoria del proceso.
+const MAX_BODY_BYTES = 25 * 1024 * 1024;
+
 function readJsonBody(req: Connect.IncomingMessage): Promise<any> {
   return new Promise((resolve, reject) => {
     let raw = '';
-    req.on('data', (chunk) => { raw += chunk; });
+    let size = 0;
+    req.on('data', (chunk) => {
+      size += chunk.length;
+      if (size > MAX_BODY_BYTES) {
+        reject(new Error(`Petición demasiado grande (límite ${MAX_BODY_BYTES / 1024 / 1024} MB).`));
+        req.destroy();
+        return;
+      }
+      raw += chunk;
+    });
     req.on('end', () => {
       try { resolve(raw ? JSON.parse(raw) : {}); }
       catch (err) { reject(err); }
@@ -145,15 +173,35 @@ function geminiProxyPlugin(apiKey: string): Plugin {
 
 export default defineConfig(({ mode }) => {
     const env = loadEnv(mode, '.', '');
+    // El servidor de desarrollo expone `/api/analyze-invoice`, que gasta la
+    // cuota de la API key SIN autenticación alguna. Por eso escucha sólo en
+    // localhost; para abrirlo a la red local (p. ej. probar desde el móvil)
+    // hay que pedirlo explícitamente con DEV_HOST=0.0.0.0 en .env.local.
+    const host = env.DEV_HOST || 'localhost';
     return {
       server: {
-        port: 3000,
-        host: '0.0.0.0',
+        port: 3010,
+        host,
       },
       plugins: [react(), tailwindcss(), pdfjsAssetsPlugin(), geminiProxyPlugin(env.GEMINI_API_KEY)],
       resolve: {
         alias: {
           '@': path.resolve(__dirname, '.'),
+        }
+      },
+      build: {
+        rollupOptions: {
+          output: {
+            // Sin esto todo sale en un único bundle de ~1,7 MB: quien use el
+            // motor IA se descargaba igualmente Tesseract entero.
+            manualChunks: {
+              pdfjs: ['pdfjs-dist/legacy/build/pdf.mjs'],
+              pdflib: ['pdf-lib'],
+              xlsx: ['xlsx'],
+              zip: ['jszip'],
+              react: ['react', 'react-dom', 'react-dom/client']
+            }
+          }
         }
       }
     };

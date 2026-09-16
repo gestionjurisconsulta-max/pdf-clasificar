@@ -43,3 +43,10 @@ Desktop.ini
 # Local test binary files
 debug-real.pdf
 
+
+# Salidas de build accidentales (un outDir mal configurado dejo aqui 5 MB de
+# assets de pdf.js, que llegaron a estar commiteados)
+dummy-non-existing-folder/
+
+# Ficheros de prueba locales
+test-fixture.*
