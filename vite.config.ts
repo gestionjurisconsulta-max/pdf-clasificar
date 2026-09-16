@@ -178,10 +178,27 @@ export default defineConfig(({ mode }) => {
     // localhost; para abrirlo a la red local (p. ej. probar desde el móvil)
     // hay que pedirlo explícitamente con DEV_HOST=0.0.0.0 en .env.local.
     const host = env.DEV_HOST || 'localhost';
+
+    // En producción nginx sirve la SPA y hace de proxy de /api. En desarrollo
+    // lo hace Vite, así que el código del navegador usa rutas relativas en los
+    // dos casos y no hay ninguna URL de servidor en el build.
+    //
+    // Se enrutan las rutas UNA A UNA en lugar de todo `/api`: el plugin
+    // gemini-proxy atiende /api/analyze-invoice dentro de este mismo servidor,
+    // y un proxy genérico se lo llevaría al backend de Python, que no lo tiene.
+    const apiTarget = env.API_PROXY_TARGET || 'http://localhost:8080';
+    const proxy = Object.fromEntries(
+      ['/api/health', '/api/clients', '/api/batches'].map((route) => [
+        route,
+        { target: apiTarget, changeOrigin: true }
+      ])
+    );
+
     return {
       server: {
         port: 3010,
         host,
+        proxy,
       },
       plugins: [react(), tailwindcss(), pdfjsAssetsPlugin(), geminiProxyPlugin(env.GEMINI_API_KEY)],
       resolve: {

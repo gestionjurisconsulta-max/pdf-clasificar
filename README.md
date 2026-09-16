@@ -3,18 +3,27 @@
 Trocea PDF con muchas facturas y albaranes y reparte cada documento en la
 carpeta de su cliente.
 
-El proyecto tiene dos piezas:
+La aplicación tiene **dos modos**, y se cambia entre ellos con el selector de la
+cabecera. La elección se recuerda; si no hay ninguna guardada, arranca en
+Servidor cuando la API responde y en Local cuando no.
 
-- **La aplicación web** (React + TypeScript), que procesa un PDF entero en el
-  navegador. El fichero nunca sale del equipo salvo que se active expresamente
-  el motor de IA, que envía la imagen de cada página a la API de Google Gemini
-  (la app pide confirmación antes).
-- **La API** (Python + PostgreSQL, en contenedores), pensada para un VPS:
-  admite varios Excel de clientes y varios PDF a la vez, separa las facturas de
-  los albaranes y guarda el histórico. Ver [docs/arquitectura.md](docs/arquitectura.md).
+| | Servidor | Local |
+|---|---|---|
+| Dónde se procesa | En el backend (Python) | En tu navegador |
+| Cuántos ficheros | Varios Excel y varios PDF a la vez | Un PDF |
+| Separa albaranes | Sí | No |
+| Revisión visual | No | Sí: miniaturas, rotar, borrar, agrupar |
+| Histórico | Sí, en PostgreSQL | No, se pierde al recargar |
+| Necesita servidor | Sí | No |
 
-> La interfaz web todavía **no** habla con la API: hace su propio procesado en
-> el navegador, como siempre. Conectarlas es el paso siguiente.
+**Servidor** es el modo para el día a día en el VPS: subes los Excel de clientes
+y los PDF del mes, y el backend los trocea, separa facturas de albaranes y los
+reparte por cliente. Ver [docs/arquitectura.md](docs/arquitectura.md).
+
+**Local** es el modo para cuando hace falta ojo humano sobre un documento
+concreto: enseña una miniatura por página y deja rotar, borrar y agrupar a mano
+antes de trocear. El fichero no sale del equipo, salvo que se active
+expresamente el motor de IA (la app pide confirmación antes).
 
 ## Arrancar con Docker
 

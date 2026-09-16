@@ -128,13 +128,34 @@ Recomendaciones para producción:
 - Los PDF procesados se acumulan en `storage`. Todavía no hay borrado
   automático de lotes antiguos.
 
-## Lo que queda del diseño anterior
+## El frontend
 
-El frontend sigue siendo el de siempre: hace todo el trabajo **en el navegador**
-con pdf.js, Tesseract.js y pdf-lib, y todavía no habla con esta API. Es decir,
-ahora mismo la lógica de clasificación existe dos veces, en TypeScript y en
-Python, con los mismos casos de prueba en los dos lados.
+`App.tsx` es una carcasa fina que elige entre dos espacios de trabajo:
 
-Eso es deliberado: primero la infraestructura, y migrar la interfaz a la API es
-el paso siguiente. Hasta que se haga, la aplicación web funciona exactamente
-como antes y el backend se usa por su API.
+- `ServerWorkspace.tsx` habla con esta API a través de `services/apiClient.ts`.
+  Sube varios ficheros, sondea el estado del lote cada 2 s mientras siga
+  trabajando y enseña los documentos detectados con su cliente, su tipo y el
+  motivo de cada unión de páginas.
+- `LocalWorkspace.tsx` es el organizador de siempre, que procesa en el
+  navegador. Se mantiene porque resuelve otro problema: revisar un documento
+  página a página.
+
+Las rutas de la API son **relativas** (`/api/...`). En producción las sirve
+nginx; en desarrollo, el `server.proxy` de `vite.config.ts`. Así no hay ninguna
+URL de servidor escrita en el código ni en el build.
+
+El proxy de desarrollo enruta las rutas una a una (`/api/health`,
+`/api/clients`, `/api/batches`) en lugar de todo `/api`, porque el plugin
+`gemini-proxy` atiende `/api/analyze-invoice` dentro del propio servidor de
+Vite y un proxy genérico se lo llevaría al backend de Python, que no lo tiene.
+
+### La lógica está en dos sitios
+
+La clasificación existe en TypeScript (para el modo local) y en Python (para el
+servidor), con los mismos casos de prueba en los dos lados. Es el precio de
+mantener los dos modos. Si el modo local deja de hacer falta, el borrado de la
+versión TypeScript es directo; mientras tanto, **un cambio de criterio hay que
+hacerlo en los dos.**
+
+La detección de albaranes es la excepción: sólo existe en Python. El modo local
+trata todo como facturas.
