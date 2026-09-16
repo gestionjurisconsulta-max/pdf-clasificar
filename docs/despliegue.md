@@ -13,7 +13,7 @@ volúmenes o redes que no sean suyos.
 | | |
 |---|---|
 | Docker Engine con el plugin `compose` v2 | `docker compose version` |
-| nginx en el host | `nginx -v` |
+| nginx en el host, 1.25 o superior | `nginx -v` |
 | certbot | `dnf install epel-release certbot` / `apt install certbot` |
 | git | `git --version` |
 | Disco | ~3 GB para las imágenes, más lo que ocupen los lotes en curso |
@@ -397,6 +397,12 @@ el vhost del host. El backend sigue trabajando; es nginx quien se cansa.
 **El backend se reinicia solo.** Probablemente el OOM killer. Confírmalo con
 `docker inspect pdf-clasificar-backend-1 --format '{{.State.OOMKilled}}'` y sube
 `BACKEND_MEMORY` en `.env`.
+
+**`unknown directive "http2"` al recargar nginx.** El vhost usa `http2 on;`,
+que existe desde nginx 1.25. En una version anterior hay que sustituir esa
+linea por `listen 443 ssl http2;` y quitar el `listen 443 ssl;` de encima. Ojo:
+si nginx no arranca, se lleva por delante a todos los proyectos del VPS, asi
+que esto se descubre siempre con `nginx -t`, nunca recargando a ciegas.
 
 **`port is already allocated` al desplegar.** Otro proyecto del VPS ocupa ese
 puerto. Cambia `HTTP_PORT` en `.env` y el `proxy_pass` del vhost.
