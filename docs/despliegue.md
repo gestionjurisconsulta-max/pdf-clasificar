@@ -209,6 +209,39 @@ Puedes ensayarla sin gastar cuota:
 sudo certbot renew --dry-run
 ```
 
+**Que renueve no basta: nginx tiene que enterarse.** Certbot escribe el
+certificado nuevo en disco, pero nginx sigue sirviendo el que cargó en memoria
+al arrancar. Sin un hook que lo recargue, el sitio empieza a dar error de
+certificado caducado *con el nuevo ya puesto*, y dentro de 90 días, cuando
+nadie se acuerde de esto. `certbot certonly` no configura ninguno.
+
+Comprueba si los certificados de la máquina lo tienen:
+
+```bash
+for f in /etc/letsencrypt/renewal/*.conf; do grep -q "renew_hook" "$f" && echo "CON hook: $(basename "$f")" || echo "SIN hook: $(basename "$f")"; done
+```
+
+Lo que falte se arregla de una vez y para todos los dominios del VPS, presentes
+y futuros, con un hook global: lo que haya en `renewal-hooks/deploy/` se
+ejecuta tras renovar cualquier certificado.
+
+```bash
+printf '#!/bin/sh
+systemctl reload nginx
+' | sudo tee /etc/letsencrypt/renewal-hooks/deploy/reload-nginx.sh
+```
+
+```bash
+sudo chmod +x /etc/letsencrypt/renewal-hooks/deploy/reload-nginx.sh
+```
+
+Y para comprobar que el hook se ejecuta, porque el `--dry-run` de arriba **no**
+los corre:
+
+```bash
+sudo certbot renew --dry-run --run-deploy-hooks
+```
+
 ### 8. SELinux (sólo Rocky, AlmaLinux y RHEL)
 
 Estas distribuciones traen SELinux en `enforcing`, y por defecto **prohíben a
