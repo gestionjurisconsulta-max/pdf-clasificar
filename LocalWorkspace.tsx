@@ -89,6 +89,14 @@ const LocalWorkspace: React.FC<LocalWorkspaceProps> = ({ modeSwitch }) => {
   // clientes con el mismo nombre comparten carpeta y deben compartir estado.
   const [companyStatus, setCompanyStatus] = useState<Record<string, boolean>>({});
 
+  // Confirmación de lo que no tiene vuelta atrás. Una hoja eliminada sólo se
+  // recupera volviendo a subir el PDF, así que no debe irse de un clic.
+  const [confirmacion, setConfirmacion] = useState<{
+    titulo: string;
+    mensaje: string;
+    textoBoton: string;
+    accion: () => void;
+  } | null>(null);
   const [zoomPage, setZoomPage] = useState<{ image: string; index: number } | null>(null);
   const [isZoomLoading, setIsZoomLoading] = useState(false);
   const [zoomLevel, setZoomLevel] = useState(1);
@@ -271,6 +279,30 @@ const LocalWorkspace: React.FC<LocalWorkspaceProps> = ({ modeSwitch }) => {
     if (selectedCount === 0) return;
     setPages(prev => prev.filter(p => !p.isSelected));
     addLog(`${selectedCount} páginas eliminadas.`);
+  };
+
+  // Lo que el usuario tiene que confirmar antes de perder hojas. El PDF de
+  // origen no se toca, pero el organizador no guarda lo borrado: recuperarlo
+  // obliga a volver a subir el fichero y a rehacer las agrupaciones.
+  const confirmarEliminarPagina = (idx: number, alBorrar?: () => void) => setConfirmacion({
+    titulo: `Eliminar la hoja #${idx + 1}`,
+    mensaje: 'No saldrá en ningún PDF al dividir. El fichero original no se toca, '
+      + 'pero para recuperarla tendrás que volver a subirlo.',
+    textoBoton: 'Eliminar la hoja',
+    accion: () => { deletePage(idx); alBorrar?.(); },
+  });
+
+  const confirmarEliminarSeleccionadas = () => {
+    const seleccionadas = pages.filter(p => p.isSelected).length;
+    if (seleccionadas === 0) return;
+    setConfirmacion({
+      titulo: seleccionadas === 1 ? 'Eliminar 1 hoja' : `Eliminar ${seleccionadas} hojas`,
+      mensaje: `${seleccionadas === 1 ? 'La hoja seleccionada no saldrá' : 'Las hojas seleccionadas no saldrán'}`
+        + ' en ningún PDF al dividir. El fichero original no se toca, pero para '
+        + `${seleccionadas === 1 ? 'recuperarla' : 'recuperarlas'} tendrás que volver a subirlo.`,
+      textoBoton: seleccionadas === 1 ? 'Eliminar la hoja' : `Eliminar las ${seleccionadas} hojas`,
+      accion: deleteSelectedPages,
+    });
   };
   const toggleSelect = (idx: number) => setPages(prev => prev.map(p => p.index === idx ? { ...p, isSelected: !p.isSelected } : p));
   const updateManualReference = (idx: number, val: string) => setPages(prev => prev.map(p => p.index === idx ? { ...p, manualReference: val } : p));
@@ -544,6 +576,15 @@ const LocalWorkspace: React.FC<LocalWorkspaceProps> = ({ modeSwitch }) => {
     }
   };
 
+  // Escape cancela: es lo que espera cualquiera delante de un aviso de borrado,
+  // y evita que la única salida sea acertarle al botón.
+  useEffect(() => {
+    if (!confirmacion) return;
+    const alPulsar = (e: KeyboardEvent) => { if (e.key === 'Escape') setConfirmacion(null); };
+    window.addEventListener('keydown', alPulsar);
+    return () => window.removeEventListener('keydown', alPulsar);
+  }, [confirmacion]);
+
   const closeZoom = () => { setZoomPage(null); setZoomLevel(1); };
   const zoomRotation = zoomPage ? (pages.find(p => p.index === zoomPage.index)?.rotation ?? 0) : 0;
 
@@ -606,6 +647,44 @@ const LocalWorkspace: React.FC<LocalWorkspaceProps> = ({ modeSwitch }) => {
   return (
     <div className="min-h-screen bg-[#f1f5f9] flex flex-col h-screen overflow-hidden text-slate-900">
       
+      {/* CONFIRMACIÓN DE BORRADO. Por encima del visor (z-100) para poder
+          confirmar también desde ahí sin cerrarlo antes. */}
+      {confirmacion && (
+        <div
+          className="fixed inset-0 z-[110] bg-slate-950/90 flex items-center justify-center p-4 backdrop-blur-md"
+          onClick={() => setConfirmacion(null)}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="titulo-confirmacion"
+        >
+          <div className="bg-white rounded-[2rem] w-full max-w-md p-8 shadow-2xl flex flex-col gap-6" onClick={e => e.stopPropagation()}>
+            <div className="w-14 h-14 bg-red-50 text-red-600 rounded-2xl flex items-center justify-center shrink-0">
+              <i className="fas fa-trash-can text-xl"></i>
+            </div>
+            <div className="space-y-3">
+              <h3 id="titulo-confirmacion" className="text-2xl font-black tracking-tighter leading-none">{confirmacion.titulo}</h3>
+              <p className="text-sm text-slate-500 font-medium leading-relaxed">{confirmacion.mensaje}</p>
+            </div>
+            <div className="flex flex-col sm:flex-row gap-3">
+              {/* El foco empieza en Cancelar: con Intro no se borra nada. */}
+              <button
+                autoFocus
+                onClick={() => setConfirmacion(null)}
+                className="flex-1 py-4 bg-slate-100 text-slate-600 rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-slate-200 transition-all"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={() => { confirmacion.accion(); setConfirmacion(null); }}
+                className="flex-1 py-4 bg-red-600 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-red-700 shadow-lg transition-all"
+              >
+                {confirmacion.textoBoton}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* VISOR ZOOM - RESPONSIVO */}
       {zoomPage && (
         <div className="fixed inset-0 z-[100] bg-slate-950/90 flex items-center justify-center p-2 md:p-6 backdrop-blur-md" onClick={closeZoom}>
@@ -660,7 +739,7 @@ const LocalWorkspace: React.FC<LocalWorkspaceProps> = ({ modeSwitch }) => {
               <button onClick={() => rotatePage(zoomPage.index)} className="w-full py-4 bg-slate-100 rounded-2xl font-black text-[10px] uppercase hover:bg-red-50 hover:text-red-600 transition-all flex items-center justify-center gap-3">
                 <i className="fas fa-redo"></i> Rotar 90°
               </button>
-              <button onClick={() => { deletePage(zoomPage.index); closeZoom(); }} className="w-full py-4 bg-red-50 border border-red-200 text-red-600 rounded-2xl font-black text-[10px] uppercase hover:bg-red-600 hover:text-white transition-all flex items-center justify-center gap-3">
+              <button onClick={() => confirmarEliminarPagina(zoomPage.index, closeZoom)} className="w-full py-4 bg-red-50 border border-red-200 text-red-600 rounded-2xl font-black text-[10px] uppercase hover:bg-red-600 hover:text-white transition-all flex items-center justify-center gap-3">
                 <i className="fas fa-trash-can"></i> Eliminar página
               </button>
               <button onClick={closeZoom} className="w-full py-4 bg-slate-900 text-white rounded-2xl font-black uppercase text-[10px] mt-auto hover:bg-red-600 shadow-lg">Guardar</button>
@@ -740,7 +819,7 @@ const LocalWorkspace: React.FC<LocalWorkspaceProps> = ({ modeSwitch }) => {
                     <div className="flex gap-2">
                      <button onClick={groupSelected} className="px-6 py-3 bg-red-600 text-white rounded-xl text-[10px] font-black uppercase hover:bg-red-700 shadow-lg">Unir</button>
                      {pages.some(p => p.isSelected) && (
-                       <button onClick={deleteSelectedPages} className="px-5 py-3 bg-red-50 text-red-600 border border-red-200 rounded-xl text-[10px] font-black uppercase hover:bg-red-600 hover:text-white transition-all shadow-sm flex items-center gap-2">
+                       <button onClick={confirmarEliminarSeleccionadas} className="px-5 py-3 bg-red-50 text-red-600 border border-red-200 rounded-xl text-[10px] font-black uppercase hover:bg-red-600 hover:text-white transition-all shadow-sm flex items-center gap-2">
                          <i className="fas fa-trash-can"></i> Eliminar ({pages.filter(p => p.isSelected).length})
                        </button>
                      )}
@@ -775,7 +854,7 @@ const LocalWorkspace: React.FC<LocalWorkspaceProps> = ({ modeSwitch }) => {
                   <div key={p.index} className={`relative group bg-white rounded-[1.5rem] shadow-sm border-2 transition-all ${p.groupId ? 'border-red-500 ring-4 ring-red-50' : p.isSelected ? 'border-red-600' : 'border-white hover:border-slate-200'}`}>
                     <input type="checkbox" checked={p.isSelected} onChange={() => toggleSelect(p.index)} className="absolute top-3 left-3 z-30 w-5 h-5 accent-red-600 rounded-full cursor-pointer" />
                     <div className="absolute top-3 right-3 z-30 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                       <button onClick={(e) => { e.stopPropagation(); deletePage(p.index); }} title="Eliminar página" className="w-8 h-8 bg-white text-red-500 hover:bg-red-600 hover:text-white rounded-lg shadow-xl flex items-center justify-center transition-all"><i className="fas fa-trash-can text-xs"></i></button>
+                       <button onClick={(e) => { e.stopPropagation(); confirmarEliminarPagina(p.index); }} title="Eliminar página" className="w-8 h-8 bg-white text-red-500 hover:bg-red-600 hover:text-white rounded-lg shadow-xl flex items-center justify-center transition-all"><i className="fas fa-trash-can text-xs"></i></button>
                        <button onClick={() => openZoom(p.index)} disabled={isZoomLoading} title="Ver página a tamaño completo" className="w-8 h-8 bg-white text-red-600 rounded-lg shadow-xl flex items-center justify-center hover:bg-red-600 hover:text-white transition-all disabled:opacity-40"><i className={`fas ${isZoomLoading ? 'fa-circle-notch fa-spin' : 'fa-eye'} text-xs`}></i></button>
                        <button onClick={() => rotatePage(p.index)} title="Rotar 90°" className="w-8 h-8 bg-white text-slate-400 rounded-lg shadow-xl flex items-center justify-center hover:text-red-600 transition-all"><i className="fas fa-rotate text-xs"></i></button>
                     </div>
