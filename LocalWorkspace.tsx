@@ -243,7 +243,10 @@ const LocalWorkspace: React.FC<LocalWorkspaceProps> = ({ modeSwitch }) => {
           mimeType: 'image/jpeg',
           quality: THUMB_QUALITY
         });
-        newPages.push({ index: i, thumb, rotation: 0, manualReference: '', invoiceNumber: '', cif: '', isContinuation: false });
+        // `isSelected` arranca en false y no sin definir: su casilla lee ese
+        // campo, y un input que pasa de undefined a un valor deja de ser no
+        // controlado a mitad de vida, que es justo lo que React reprocha.
+        newPages.push({ index: i, thumb, rotation: 0, manualReference: '', invoiceNumber: '', cif: '', isContinuation: false, isSelected: false });
         if (i % 5 === 0 || i === count - 1) setPages([...newPages]);
         setProgress(p => ({ ...p, current: i + 1 }));
       }
@@ -852,7 +855,9 @@ const LocalWorkspace: React.FC<LocalWorkspaceProps> = ({ modeSwitch }) => {
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 2xl:grid-cols-8 gap-4 animate-in fade-in duration-500">
                 {pages.map((p) => (
                   <div key={p.index} className={`relative group bg-white rounded-[1.5rem] shadow-sm border-2 transition-all ${p.groupId ? 'border-red-500 ring-4 ring-red-50' : p.isSelected ? 'border-red-600' : 'border-white hover:border-slate-200'}`}>
-                    <input type="checkbox" checked={p.isSelected} onChange={() => toggleSelect(p.index)} className="absolute top-3 left-3 z-30 w-5 h-5 accent-red-600 rounded-full cursor-pointer" />
+                    {/* `?? false` porque el campo es opcional en el tipo: así
+                        la casilla nace controlada venga como venga la página. */}
+                    <input type="checkbox" checked={p.isSelected ?? false} onChange={() => toggleSelect(p.index)} className="absolute top-3 left-3 z-30 w-5 h-5 accent-red-600 rounded-full cursor-pointer" />
                     <div className="absolute top-3 right-3 z-30 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                        <button onClick={(e) => { e.stopPropagation(); confirmarEliminarPagina(p.index); }} title="Eliminar página" className="w-8 h-8 bg-white text-red-500 hover:bg-red-600 hover:text-white rounded-lg shadow-xl flex items-center justify-center transition-all"><i className="fas fa-trash-can text-xs"></i></button>
                        <button onClick={() => openZoom(p.index)} disabled={isZoomLoading} title="Ver página a tamaño completo" className="w-8 h-8 bg-white text-red-600 rounded-lg shadow-xl flex items-center justify-center hover:bg-red-600 hover:text-white transition-all disabled:opacity-40"><i className={`fas ${isZoomLoading ? 'fa-circle-notch fa-spin' : 'fa-eye'} text-xs`}></i></button>
