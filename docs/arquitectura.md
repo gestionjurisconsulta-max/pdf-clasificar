@@ -2,7 +2,7 @@
 
 ```
                     ┌──────────────────────────────┐
-  navegador ──────▶ │ frontend  (nginx + SPA)       │  puerto 8080
+  navegador ──────▶ │ frontend  (nginx + SPA)       │  HTTP_PORT (8080 por defecto)
                     │  · sirve el build de Vite     │
                     │  · /api/* ─▶ backend          │
                     └───────────────┬──────────────┘

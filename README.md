@@ -43,7 +43,9 @@ La aplicación queda en http://localhost:8080 y la API en
 http://localhost:8080/api (documentación interactiva en `/api/docs`).
 
 El puerto sólo escucha en la interfaz local. Para abrirlo a tu red, pon
-`HTTP_BIND=0.0.0.0` en `.env`.
+`HTTP_BIND=0.0.0.0` en `.env`; para cambiarlo, `HTTP_PORT`. El 8080 es sólo el
+valor por defecto: en un VPS con varios proyectos suele estar cogido, y el del
+despacho sirve en el **8083** (ver [docs/despliegue.md](docs/despliegue.md)).
 
 ## Desplegar en el VPS
 

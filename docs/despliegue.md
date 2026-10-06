@@ -321,7 +321,7 @@ los pasos 5 a 9 y crea un *Proxy Host*:
 | Domain Names | `gestion.pdf.iages.es` |
 | Scheme | `http` |
 | Forward Hostname / IP | la IP del host en `docker0`, normalmente `172.17.0.1` |
-| Forward Port | `8080` |
+| Forward Port | el de `HTTP_PORT` en tu `.env` (aquí, `8083`) |
 | Websockets Support | no hace falta |
 | SSL | *Request a new certificate* + *Force SSL* + *HTTP/2* |
 
@@ -390,6 +390,28 @@ reinicio del VPS. No hace falta ninguna unidad de systemd.
 
 Si paras con `docker compose stop`, siguen parados tras un reinicio hasta que
 los arranques a mano: es justo lo que quiere decir `unless-stopped`.
+
+### Comprobar que responde
+
+La aplicación escucha en el puerto de `HTTP_PORT` y sólo en `127.0.0.1`. En
+**este VPS es el 8083**, porque el 8080 ya estaba cogido por otro proyecto:
+
+```bash
+curl -s localhost:8083/api/health
+```
+
+Contesta `{"status":"ok","database":"ok"}` cuando la API y la base de datos
+están sanas. Si no recuerdas el puerto, lo dicen el `.env` y los propios
+contenedores:
+
+```bash
+grep HTTP_PORT .env
+docker compose ps          # columna PORTS: 127.0.0.1:8083->80/tcp
+```
+
+Cuidado con `curl -s` contra el puerto equivocado: silencia el error de
+conexión y devuelve una línea **vacía**, que parece que la aplicación no
+responde cuando lo que falla es el puerto. Con `curl -sS` sí se ve el error.
 
 ## Copias de seguridad
 
