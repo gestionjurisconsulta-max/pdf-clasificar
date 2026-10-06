@@ -14,8 +14,17 @@ export const loadSourcePdf = async (originalPdfBuffer: ArrayBuffer): Promise<PDF
   return await PDFDocument.load(originalPdfBuffer);
 };
 
-/** Extrae las páginas indicadas del PDF de origen, en ese orden, a un PDF nuevo. */
-export const createMergedPdf = async (sourcePdf: PDFDocument, pages: PageSelection[]): Promise<Uint8Array> => {
+/**
+ * Extrae las páginas indicadas del PDF de origen, en ese orden, a un PDF nuevo.
+ *
+ * El tipo precisa `ArrayBuffer` en vez del `Uint8Array` a secas que declara
+ * pdf-lib: desde TypeScript 5.7 un array tipado lleva su buffer en el tipo, y
+ * el `ArrayBufferLike` que se asume por defecto incluye `SharedArrayBuffer`,
+ * que la File System Access API no admite. Escribir el resultado en una carpeta
+ * local no compilaba por eso. pdf-lib nunca devuelve memoria compartida, así
+ * que esto sólo afina el tipo; no cambia lo que pasa en tiempo de ejecución.
+ */
+export const createMergedPdf = async (sourcePdf: PDFDocument, pages: PageSelection[]): Promise<Uint8Array<ArrayBuffer>> => {
   const newPdf = await PDFDocument.create();
 
   const copiedPages = await newPdf.copyPages(sourcePdf, pages.map(p => p.index));
@@ -29,5 +38,5 @@ export const createMergedPdf = async (sourcePdf: PDFDocument, pages: PageSelecti
     newPdf.addPage(copiedPage);
   });
 
-  return await newPdf.save();
+  return await newPdf.save() as Uint8Array<ArrayBuffer>;
 };
