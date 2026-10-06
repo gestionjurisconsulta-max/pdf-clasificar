@@ -11,7 +11,8 @@ import re
 from dataclasses import dataclass, field
 
 from ..enums import DocumentType
-from .document_type import detect_document_type, normalize
+from .document_type import declares_own_title, detect_document_type, normalize
+from .header_doc import read_header_doc
 from .invoice_number import DEFAULT_CIF_REGEX, DEFAULT_INVOICE_REGEX, extract_invoice_number
 from .matching import canonical_form
 
@@ -29,6 +30,12 @@ BLANK_THRESHOLD = 12
 @dataclass
 class PageIdentity:
     number: str = ""
+    #: Número leído de la línea de cabecera, sin depender de que vaya pegado a
+    #: la palabra "Factura" (ver `header_doc.py`). Es el canal que separa dos
+    #: facturas seguidas del mismo cliente cuando `number` sale vacío.
+    header_number: str = ""
+    #: La página encabeza su propio título («ALBARÁN: A6-004757»).
+    titles_itself: bool = False
     cifs: list[str] = field(default_factory=list)
     page_marker: int | None = None
     #: El total de "Pág. 2 DE 3". Saber cuántas hojas tiene el documento es lo
@@ -61,11 +68,16 @@ def read_page_identity(
     cif_pattern: str = DEFAULT_CIF_REGEX,
 ) -> PageIdentity:
     marker = _PAGE_MARKER.search(normalize(text))
+    header = read_header_doc(text)
     return PageIdentity(
         number=extract_invoice_number(text, invoice_pattern),
+        header_number=header.number,
+        titles_itself=declares_own_title(text),
         cifs=_read_cifs(text, cif_pattern),
-        page_marker=int(marker.group(1)) if marker else None,
-        page_total=int(marker.group(2)) if marker else None,
+        # Si la página no escribe "Pág. X de Y" pero su cabecera trae un "1/1"
+        # suelto, vale igual: es lo que permite cerrar el documento.
+        page_marker=int(marker.group(1)) if marker else header.page,
+        page_total=int(marker.group(2)) if marker else header.total,
         says_continuation=bool(_CONTINUATION_WORDS.search(normalize(text))),
         is_blank=len((text or "").strip()) < BLANK_THRESHOLD,
         doc_type=detect_document_type(text).doc_type,
@@ -115,10 +127,28 @@ def is_continuation(page: PageIdentity, current: PageIdentity | None) -> Verdict
     if page.is_blank:
         return Verdict(True, "no tiene texto legible")
 
+    # Repetir el número del documento en curso es la señal de continuación más
+    # fuerte que hay, y va antes que cualquier corte: una hoja que reimprime la
+    # cabecera de su factura seguiría siendo la misma factura.
+    if page.number and page.number == current.number:
+        return Verdict(True, f"repite el número {page.number}")
+
+    # Número de la línea de cabecera. Que la página tenga uno significa que ha
+    # impreso una cabecera de documento: si no es la del documento en curso,
+    # abre uno nuevo. Es la regla genérica, la que funciona con un proveedor
+    # que no se haya visto nunca.
+    if page.header_number:
+        if page.header_number == current.header_number:
+            return Verdict(True, f"repite el nº de cabecera {page.header_number}")
+        return Verdict(False, f"su cabecera abre otro documento (nº {page.header_number})")
+
     if page.number:
-        if page.number == current.number:
-            return Verdict(True, f"repite el número {page.number}")
         return Verdict(False, f"trae otro número ({page.number})")
+
+    # Se titula a sí misma y no repite el número del documento en curso (que ya
+    # se ha comprobado arriba): es la primera hoja de otro documento.
+    if page.titles_itself:
+        return Verdict(False, "encabeza su propio título de documento")
 
     nuevos = [c for c in page.cifs if c not in current.cifs]
     if nuevos:
@@ -178,7 +208,7 @@ def group_by_continuation(
                 f"{group.indices[0] + 1}: {verdict.reason}."
             )
             if not group.number:
-                group.number = identity.number
+                group.number = identity.number or identity.header_number
             if group.doc_type is DocumentType.DESCONOCIDO:
                 group.doc_type = identity.doc_type
             # La identidad acumula: la hoja 3 sigue reconociéndose aunque sólo
@@ -186,6 +216,8 @@ def group_by_continuation(
             merged = identities[-1]
             identities[-1] = PageIdentity(
                 number=merged.number or identity.number,
+                header_number=merged.header_number or identity.header_number,
+                titles_itself=merged.titles_itself,
                 cifs=merged.cifs + [c for c in identity.cifs if c not in merged.cifs],
                 page_marker=identity.page_marker,
                 page_total=identity.page_total,
@@ -201,7 +233,9 @@ def group_by_continuation(
                     indices=[page.index],
                     notes=[],
                     doc_type=identity.doc_type,
-                    number=identity.number,
+                    # Si la palabra clave no ha dado número, sirve el de la
+                    # cabecera: es el que lleva el nombre del fichero.
+                    number=identity.number or identity.header_number,
                 )
             )
             identities.append(identity)

@@ -173,3 +173,69 @@ describe('documentos que se declaran completos', () => {
     expect(grupos.map(g => g.indices)).toEqual([[0, 1], [2]]);
   });
 });
+
+/**
+ * El caso que metía dos facturas distintas en el mismo PDF. Estos proveedores
+ * no escriben "Factura Nº" en ninguna parte: el número va solo, en su columna
+ * de la cabecera. Sin leer esa línea, la segunda factura no aportaba ninguna
+ * identidad propia y se unía a la primera.
+ *
+ * Mismos casos que `TestFacturasSinPalabraClave` en backend/tests/test_domain.py.
+ */
+describe('facturas que no escriben la palabra "factura"', () => {
+  const tabular = (numero: string, fecha = '04/09/2026', pag = '1/1') =>
+    [
+      'DISTRIBUCIONES NORTE SL  CIF: B11111111',
+      'N DOCUMENTO   FECHA        CLIENTE              PAG',
+      `${numero}    ${fecha}   LA CASA ALIMENT SL   ${pag}`,
+      'NIF: B67825950',
+      'Filtro aceite 24 12,40 297,60',
+      'Base imponible 297,60  IVA 21% 62,50  TOTAL 360,10'
+    ].join('\n');
+
+  it('dos facturas seguidas del mismo cliente no se fusionan', () => {
+    const grupos = groupByContinuation([
+      { index: 0, text: tabular('262000663') },
+      { index: 1, text: tabular('262000664', '05/09/2026') },
+      { index: 2, text: tabular('262000665', '05/09/2026') }
+    ]);
+    expect(grupos.map(g => g.indices)).toEqual([[0], [1], [2]]);
+  });
+
+  it('la misma factura en dos hojas sigue unida', () => {
+    // La cabecera se repite en las dos hojas: es un solo documento.
+    const grupos = groupByContinuation([
+      { index: 0, text: tabular('262000663', '04/09/2026', '1/2') },
+      { index: 1, text: tabular('262000663', '04/09/2026', '2/2') },
+      { index: 2, text: tabular('262000670', '06/09/2026') }
+    ]);
+    expect(grupos.map(g => g.indices)).toEqual([[0, 1], [2]]);
+  });
+
+  it('la paginación suelta de la cabecera cierra el documento', () => {
+    // "1/1" vale igual que "Pág. 1 de 1": lo que venga detrás es otro documento
+    // aunque su OCR no haya dejado nada legible.
+    const grupos = groupByContinuation([
+      { index: 0, text: tabular('262000663') },
+      { index: 1, text: 'hoja cuyo ocr no ha dejado nada reconocible aqui' }
+    ]);
+    expect(grupos.map(g => g.indices)).toEqual([[0], [1]]);
+  });
+
+  it('una hoja que se titula abre documento nuevo', () => {
+    // No trae número de cabecera legible, pero encabeza su propio título.
+    const grupos = groupByContinuation([
+      { index: 0, text: cabecera('ACEROS CIF: B12345678', 'F-2026-0041') },
+      { index: 1, text: 'ALBARAN: A6-004757 FECHA: 10/08/2026\nACEROS CIF: B12345678' }
+    ]);
+    expect(grupos.map(g => g.indices)).toEqual([[0], [1]]);
+  });
+
+  it('el motivo del corte queda escrito en el log', () => {
+    const grupos = groupByContinuation([
+      { index: 0, text: tabular('262000663', '04/09/2026', '1/2') },
+      { index: 1, text: tabular('262000663', '04/09/2026', '2/2') }
+    ]);
+    expect(grupos[0].notes[0]).toContain('se une');
+  });
+});

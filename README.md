@@ -105,13 +105,37 @@ automáticamente a la anterior. Una hoja se considera continuación si:
 - dice explícitamente ser la página 2 o posterior (*"Página 2 de 3"*), o lleva
   una frase de continuación; **o**
 - repite el mismo número de factura que la hoja anterior; **o**
+- repite el mismo número de documento en la línea de cabecera; **o**
 - no tiene número de factura propio y no aporta ningún CIF que no se hubiera
   visto ya en esa factura; **o**
 - no tiene texto legible.
 
-Y nunca se une si dice ser la página 1, si trae otro número de factura, si
-aparece un CIF nuevo, o si no va **físicamente pegada** a la hoja anterior
-(borrar una página rompe la cadena a propósito).
+Y nunca se une si dice ser la página 1, si trae otro número de factura, si su
+cabecera trae otro número de documento, si se titula a sí misma (*"ALBARÁN:
+A6-004757"*), si aparece un CIF nuevo, o si no va **físicamente pegada** a la
+hoja anterior (borrar una página rompe la cadena a propósito).
+
+### El número de la cabecera
+
+Muchos proveedores no escriben nunca *"Factura Nº"*: imprimen el número solo,
+en su columna de la cabecera.
+
+```
+Nº DOCUMENTO   FECHA        CLIENTE              PÁG
+262000663      04/09/2026   LA CASA ALIMENT SL   1/1
+```
+
+Sin leer esa línea, dos facturas seguidas del mismo cliente no tenían con qué
+distinguirse y acababan en el mismo PDF. Se lee aparte del número con palabra
+clave, y las dos señales se complementan: una coge *"Factura Nº F-2026-0042"* y
+la otra, el número que va suelto en su columna. De la misma línea sale la
+paginación (*"1/1"*), que es lo que cierra el documento para que la hoja
+siguiente no se le pegue aunque su OCR salga ilegible.
+
+Un número de cabecera que se repite significa la misma factura (varias hojas, o
+el original y su copia); uno distinto, un documento nuevo. No hace falta conocer
+al proveedor: es la regla que viene de DivisorPDF, donde separa igual de bien a
+un proveedor que no se ha visto nunca.
 
 Cada unión queda justificada en el log detallado, con el motivo concreto. Si
 prefieres el comportamiento antiguo, el interruptor *Facturas de varias hojas*
@@ -131,9 +155,10 @@ tú agrupes no pasa por la detección automática.
 - **En modo IA no hay detección de continuaciones**, porque se apoya en el texto
   que extrae el motor local. Con IA, cada página es una factura salvo que la
   agrupes a mano. El campo `isContinuation` que devuelve Gemini no se usa.
-- **Dos facturas seguidas del mismo cliente se separan por su número.** Si el
-  número no se llega a leer en la primera hoja de la segunda factura, podrían
-  unirse por error. El log detallado permite detectarlo.
+- **Dos facturas seguidas del mismo cliente se separan por su número**, y se
+  busca por tres caminos: la palabra clave, la línea de cabecera y el título
+  propio de la página. Si ninguno de los tres deja nada legible, podrían unirse
+  por error. El log detallado permite detectarlo.
 - **Tesseract descarga su motor de `cdn.jsdelivr.net`** la primera vez que hace
   falta OCR, así que esa parte no funciona sin conexión.
 

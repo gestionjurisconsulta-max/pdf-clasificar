@@ -8,6 +8,7 @@ import { canonicalForm, findMatchingCompany } from './services/matchingService';
 import { sanitizeName } from './services/fileNameService';
 import { DEFAULT_CIF_REGEX, DEFAULT_INVOICE_REGEX, extractInvoiceNumber } from './services/invoiceNumberService';
 import { groupByContinuation } from './services/continuationService';
+import { readHeaderDoc } from './services/headerDocService';
 import { Company, InvoicePageData, ProcessedInvoice, ProcessingStep, LearningData } from './types';
 import JSZip from 'jszip';
 import { APP_VERSION } from './constants';
@@ -446,7 +447,11 @@ const LocalWorkspace: React.FC<LocalWorkspaceProps> = ({ modeSwitch }) => {
             }
             matchedCompany = company;
 
-            invoiceNumber = extractInvoiceNumber(text, learning.patterns.invoiceRegex);
+            // Si la palabra clave no da número, sirve el de la línea de
+            // cabecera: es el mismo que ya ha decidido dónde cortar, y sin él
+            // estas facturas se guardaban todas como "S-N".
+            invoiceNumber = extractInvoiceNumber(text, learning.patterns.invoiceRegex)
+              || readHeaderDoc(text).number;
           }
         } catch (e) { addLog(`Error en análisis: ${errorMessage(e)}`); }
 

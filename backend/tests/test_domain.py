@@ -219,3 +219,70 @@ class TestDocumentosCompletos:
             PageText(2, "hoja ilegible que ya no le pertenece"),
         ])
         assert [g.indices for g in grupos] == [[0, 1], [2]]
+
+
+class TestFacturasSinPalabraClave:
+    """El caso que metía dos facturas distintas en el mismo PDF.
+
+    Estos proveedores no escriben "Factura Nº" en ninguna parte: el número va
+    solo, en su columna de la cabecera. Sin leer esa línea, la segunda factura
+    no aportaba ninguna identidad propia y se unía a la primera.
+    """
+
+    CABECERA_TABULAR = """DISTRIBUCIONES NORTE SL  CIF: B11111111
+N DOCUMENTO   FECHA        CLIENTE              PAG
+{n}    {f}   LA CASA ALIMENT SL   {p}
+NIF: B67825950
+Filtro aceite 24 12,40 297,60
+Base imponible 297,60  IVA 21% 62,50  TOTAL 360,10"""
+
+    def pagina(self, numero, fecha="04/09/2026", pag="1/1"):
+        return self.CABECERA_TABULAR.format(n=numero, f=fecha, p=pag)
+
+    def test_dos_facturas_seguidas_del_mismo_cliente_no_se_fusionan(self):
+        grupos = group_by_continuation([
+            PageText(0, self.pagina("262000663")),
+            PageText(1, self.pagina("262000664", fecha="05/09/2026")),
+            PageText(2, self.pagina("262000665", fecha="05/09/2026")),
+        ])
+        assert [g.indices for g in grupos] == [[0], [1], [2]]
+
+    def test_la_misma_factura_en_dos_hojas_sigue_unida(self):
+        # La cabecera se repite en las dos hojas: es un solo documento.
+        grupos = group_by_continuation([
+            PageText(0, self.pagina("262000663", pag="1/2")),
+            PageText(1, self.pagina("262000663", pag="2/2")),
+            PageText(2, self.pagina("262000670", fecha="06/09/2026")),
+        ])
+        assert [g.indices for g in grupos] == [[0, 1], [2]]
+
+    def test_la_paginacion_suelta_de_la_cabecera_cierra_el_documento(self):
+        # "1/1" vale igual que "Pág. 1 de 1": lo que venga detrás es otro
+        # documento aunque su OCR no haya dejado nada legible.
+        grupos = group_by_continuation([
+            PageText(0, self.pagina("262000663")),
+            PageText(1, "hoja cuyo ocr no ha dejado nada reconocible aqui"),
+        ])
+        assert [g.indices for g in grupos] == [[0], [1]]
+
+    def test_el_numero_de_cabecera_da_nombre_al_documento(self):
+        # Sin esto el fichero se guardaba como "S-N".
+        grupos = group_by_continuation([PageText(0, self.pagina("262000663"))])
+        assert grupos[0].number == "262000663"
+
+    def test_una_hoja_que_se_titula_abre_documento_nuevo(self):
+        # No trae número de cabecera legible, pero encabeza su propio título.
+        albaran = """ALBARAN: A6-004757 FECHA: 10/08/2026
+ACEROS CIF: B12345678"""
+        grupos = group_by_continuation([
+            PageText(0, CABECERA.format(n="F-41", c="ACEROS CIF: B12345678")),
+            PageText(1, albaran),
+        ])
+        assert [g.indices for g in grupos] == [[0], [1]]
+
+    def test_el_motivo_de_la_union_queda_escrito(self):
+        grupos = group_by_continuation([
+            PageText(0, self.pagina("262000663", pag="1/2")),
+            PageText(1, self.pagina("262000663", pag="2/2")),
+        ])
+        assert "se une" in grupos[0].notes[0]

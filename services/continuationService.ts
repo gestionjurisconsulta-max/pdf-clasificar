@@ -1,4 +1,5 @@
 import { canonicalForm } from './matchingService';
+import { declaresOwnTitle, readHeaderDoc } from './headerDocService';
 import { DEFAULT_CIF_REGEX, DEFAULT_INVOICE_REGEX, extractInvoiceNumber } from './invoiceNumberService';
 
 /**
@@ -22,6 +23,14 @@ const BLANK_THRESHOLD = 12;
 
 export interface PageIdentity {
   invoiceNumber: string;
+  /**
+   * Número leído de la línea de cabecera, sin depender de que vaya pegado a la
+   * palabra "Factura" (ver `headerDocService`). Es el canal que separa dos
+   * facturas seguidas del mismo cliente cuando `invoiceNumber` sale vacío.
+   */
+  headerNumber: string;
+  /** La página encabeza su propio título («ALBARÁN: A6-004757»). */
+  titlesItself: boolean;
   /** CIF encontrados en la página, en forma canónica (tolerante a OCR). */
   cifs: string[];
   /** Número de hoja si la página lo dice explícitamente ("Página 2 de 3"). */
@@ -52,12 +61,17 @@ export const readPageIdentity = (
   cifPattern: string = DEFAULT_CIF_REGEX
 ): PageIdentity => {
   const marker = text.match(PAGE_MARKER);
+  const header = readHeaderDoc(text);
 
   return {
     invoiceNumber: extractInvoiceNumber(text, invoicePattern),
+    headerNumber: header.number,
+    titlesItself: declaresOwnTitle(text),
     cifs: readCifs(text, cifPattern),
-    pageMarker: marker ? Number(marker[1]) : null,
-    pageTotal: marker ? Number(marker[2]) : null,
+    // Si la página no escribe "Pág. X de Y" pero su cabecera trae un "1/1"
+    // suelto, vale igual: es lo que permite cerrar el documento.
+    pageMarker: marker ? Number(marker[1]) : header.page,
+    pageTotal: marker ? Number(marker[2]) : header.total,
     saysContinuation: CONTINUATION_WORDS.test(text),
     isBlank: text.trim().length < BLANK_THRESHOLD
   };
@@ -106,10 +120,31 @@ export const isContinuation = (page: PageIdentity, current: PageIdentity | null)
     return { continuation: true, reason: 'no tiene texto legible' };
   }
 
+  // Repetir el número del documento en curso es la señal de continuación más
+  // fuerte que hay, y va antes que cualquier corte: una hoja que reimprime la
+  // cabecera de su factura sigue siendo la misma factura.
+  if (page.invoiceNumber && page.invoiceNumber === current.invoiceNumber) {
+    return { continuation: true, reason: `repite el número de factura ${page.invoiceNumber}` };
+  }
+
+  // Número de la línea de cabecera. Que la página tenga uno significa que ha
+  // impreso una cabecera de documento: si no es la del documento en curso, abre
+  // uno nuevo. Es la regla genérica, la que funciona con un proveedor que no se
+  // haya visto nunca.
+  if (page.headerNumber) {
+    return page.headerNumber === current.headerNumber
+      ? { continuation: true, reason: `repite el nº de cabecera ${page.headerNumber}` }
+      : { continuation: false, reason: `su cabecera abre otro documento (nº ${page.headerNumber})` };
+  }
+
   if (page.invoiceNumber) {
-    return page.invoiceNumber === current.invoiceNumber
-      ? { continuation: true, reason: `repite el número de factura ${page.invoiceNumber}` }
-      : { continuation: false, reason: `trae otro número de factura (${page.invoiceNumber})` };
+    return { continuation: false, reason: `trae otro número de factura (${page.invoiceNumber})` };
+  }
+
+  // Se titula a sí misma y no repite el número del documento en curso (que ya
+  // se ha comprobado arriba): es la primera hoja de otro documento.
+  if (page.titlesItself) {
+    return { continuation: false, reason: 'encabeza su propio título de documento' };
   }
 
   // Sin número propio. Si aporta algún CIF que la factura en curso no tenía,
@@ -171,6 +206,8 @@ export const groupByContinuation = (
       open.notes.push(`Pág. ${page.index + 1} se une a la factura de la pág. ${open.indices[0] + 1}: ${verdict.reason}.`);
       open.identity = {
         invoiceNumber: open.identity.invoiceNumber || identity.invoiceNumber,
+        headerNumber: open.identity.headerNumber || identity.headerNumber,
+        titlesItself: open.identity.titlesItself,
         cifs: [...new Set([...open.identity.cifs, ...identity.cifs])],
         pageMarker: identity.pageMarker,
         pageTotal: identity.pageTotal,

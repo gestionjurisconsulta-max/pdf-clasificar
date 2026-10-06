@@ -70,6 +70,17 @@ def normalize(text: str) -> str:
     return re.sub(r"[^\S\n]+", " ", without_accents)
 
 
+def declares_own_title(text: str) -> bool:
+    """¿La página se titula a sí misma al principio de una línea («ALBARÁN:
+    A6-004757», «FACTURA Nº M6-001364»)?
+
+    Lo usa `continuation.py` como señal de corte: una hoja que encabeza su
+    propio título no es el detalle de la anterior. Vive aquí porque el patrón
+    es el mismo que decide el tipo, y tenerlo en dos sitios se desincronizaría.
+    """
+    return bool(_SELF_TITLE.search(normalize(text)[:HEADER_CHARS]))
+
+
 @dataclass
 class TypeVerdict:
     doc_type: DocumentType
