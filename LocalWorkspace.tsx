@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useCallback, useRef } from 'react';
 import { parseExcelDatabase } from './services/excelService';
 import { pdfPageToImage, extractTextLocally, loadPdfDocument } from './services/pdfService';
 import { createMergedPdf, loadSourcePdf } from './services/mergeService';
@@ -92,6 +92,12 @@ const LocalWorkspace: React.FC<LocalWorkspaceProps> = ({ modeSwitch }) => {
   const [zoomPage, setZoomPage] = useState<{ image: string; index: number } | null>(null);
   const [isZoomLoading, setIsZoomLoading] = useState(false);
   const [zoomLevel, setZoomLevel] = useState(1);
+  // Hueco disponible para la hoja y tamaño real de la imagen. Hacen falta para
+  // que el 100% sea "la hoja entera" en vez de un ancho fijo, y para reservar
+  // el espacio al derecho cuando la página está girada.
+  const zoomViewportRef = useRef<HTMLDivElement | null>(null);
+  const [zoomViewport, setZoomViewport] = useState({ w: 0, h: 0 });
+  const [zoomNatural, setZoomNatural] = useState({ w: 0, h: 0 });
   const [showSidebar, setShowSidebar] = useState(true);
   const [showLogs, setShowLogs] = useState(true);
   const [showFolders, setShowFolders] = useState(true);
@@ -301,6 +307,9 @@ const LocalWorkspace: React.FC<LocalWorkspaceProps> = ({ modeSwitch }) => {
     if (!doc) return;
     setIsZoomLoading(true);
     setZoomLevel(1);
+    // Sin esto, la hoja nueva se dibujaría un instante con las medidas de la
+    // anterior, hasta que su imagen termine de cargar.
+    setZoomNatural({ w: 0, h: 0 });
     try {
       const image = await pdfPageToImage(doc, pageIndex, { scale: ZOOM_SCALE, mimeType: 'image/jpeg', quality: 0.9 });
       setZoomPage({ image, index: pageIndex });
@@ -538,6 +547,61 @@ const LocalWorkspace: React.FC<LocalWorkspaceProps> = ({ modeSwitch }) => {
   const closeZoom = () => { setZoomPage(null); setZoomLevel(1); };
   const zoomRotation = zoomPage ? (pages.find(p => p.index === zoomPage.index)?.rotation ?? 0) : 0;
 
+  // El visor cambia de tamaño al abrirlo, al redimensionar la ventana y al
+  // girar el móvil; sin medirlo, el "ajustar a la ventana" se quedaría con el
+  // tamaño que hubiera en el primer render. Se mide con getBoundingClientRect y
+  // no con un ResizeObserver: aquí el visor ocupa la pantalla entera, así que
+  // basta con escuchar el redimensionado de la ventana.
+  useLayoutEffect(() => {
+    if (!zoomPage) return;
+    const medir = () => {
+      const node = zoomViewportRef.current;
+      if (!node) return;
+      const { width, height } = node.getBoundingClientRect();
+      // El padding del propio visor no es hueco para la hoja.
+      const estilo = getComputedStyle(node);
+      const horizontal = parseFloat(estilo.paddingLeft) + parseFloat(estilo.paddingRight);
+      const vertical = parseFloat(estilo.paddingTop) + parseFloat(estilo.paddingBottom);
+      setZoomViewport({ w: Math.max(0, width - horizontal), h: Math.max(0, height - vertical) });
+    };
+    medir();
+    window.addEventListener('resize', medir);
+    return () => window.removeEventListener('resize', medir);
+  }, [zoomPage]);
+
+  // El tamaño real de la hoja se mide aparte y no con el `onLoad` de la <img>:
+  // la imagen es un data URL y suele estar completa antes de que React enganche
+  // el manejador, así que ese evento no llega a dispararse nunca.
+  useEffect(() => {
+    if (!zoomPage) return;
+    const probe = new Image();
+    probe.onload = () => setZoomNatural({ w: probe.naturalWidth, h: probe.naturalHeight });
+    probe.src = zoomPage.image;
+  }, [zoomPage]);
+
+  // Girada 90° o 270°, la hoja ocupa el hueco al revés: lo que era alto pasa a
+  // ser ancho. Todo lo de abajo lo tiene en cuenta.
+  const zoomIsSideways = zoomRotation % 180 !== 0;
+
+  // Tamaño de la hoja al 100%: el que la deja ENTERA dentro del visor. Antes
+  // era un ancho fijo de 800px, así que una A4 medía 1132px de alto, no cabía
+  // y la cabecera quedaba fuera de la zona a la que llega el scroll.
+  const zoomFit = (() => {
+    const { w: natW, h: natH } = zoomNatural;
+    const { w: viewW, h: viewH } = zoomViewport;
+    if (!natW || !natH || !viewW || !viewH) return { w: 0, h: 0 };
+    const availableW = zoomIsSideways ? viewH : viewW;
+    const availableH = zoomIsSideways ? viewW : viewH;
+    const scale = Math.min(availableW / natW, availableH / natH);
+    return { w: natW * scale, h: natH * scale };
+  })();
+
+  // El zoom cambia el TAMAÑO REAL de la imagen, no un `transform: scale`: así
+  // el contenedor crece con ella y se puede llegar a todos los bordes.
+  const zoomImageSize = { w: zoomFit.w * zoomLevel, h: zoomFit.h * zoomLevel };
+  const zoomBoxSize = zoomIsSideways
+    ? { w: zoomImageSize.h, h: zoomImageSize.w }
+    : zoomImageSize;
 
   return (
     <div className="min-h-screen bg-[#f1f5f9] flex flex-col h-screen overflow-hidden text-slate-900">
@@ -555,9 +619,27 @@ const LocalWorkspace: React.FC<LocalWorkspaceProps> = ({ modeSwitch }) => {
                   <button onClick={() => setZoomLevel(prev => Math.min(4, prev + 0.25))} className="w-8 h-8 hover:bg-slate-50 rounded-lg transition-all"><i className="fas fa-plus text-xs"></i></button>
                 </div>
               </div>
-              <div className="flex-1 overflow-auto custom-scrollbar-pro bg-[#94a3b8] flex items-center justify-center p-4">
-                <div className="transition-transform duration-300 shadow-2xl bg-white origin-center" style={{ transform: `rotate(${zoomRotation}deg) scale(${zoomLevel})` }}>
-                  <img src={zoomPage.image} className="max-w-none w-[500px] md:w-[800px]" alt={`Página ${zoomPage.index + 1}`} />
+              {/* El contenedor con scroll NO centra: un hijo centrado que
+                  desborda deja su mitad de arriba fuera del alcance del scroll
+                  (scrollTop no puede ser negativo). Centra el envoltorio, que
+                  crece con la hoja y nunca es menor que el visor. */}
+              <div ref={zoomViewportRef} className="flex-1 overflow-auto custom-scrollbar-pro bg-[#94a3b8] p-4">
+                <div className="min-w-full min-h-full w-max h-max flex items-center justify-center">
+                  <div
+                    className="relative shadow-2xl bg-white shrink-0"
+                    style={{ width: zoomBoxSize.w || undefined, height: zoomBoxSize.h || undefined }}
+                  >
+                    <img
+                      src={zoomPage.image}
+                      className="absolute left-1/2 top-1/2 max-w-none transition-transform duration-300"
+                      style={{
+                        width: zoomImageSize.w || undefined,
+                        height: zoomImageSize.h || undefined,
+                        transform: `translate(-50%, -50%) rotate(${zoomRotation}deg)`
+                      }}
+                      alt={`Página ${zoomPage.index + 1}`}
+                    />
+                  </div>
                 </div>
               </div>
             </div>
