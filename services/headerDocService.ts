@@ -23,6 +23,7 @@
 /** Fecha de la cabecera, con los tres separadores habituales y año de dos cifras. */
 const RE_DATE = /\b\d{2}[/.-]\d{2}[/.-](?:\d{4}|\d{2})\b/;
 const RE_DATE_AT_START = /^\d{2}[/.-]\d{2}[/.-](?:\d{4}|\d{2})\b/;
+const RE_DATE_GLOBAL = /\b\d{2}[/.-]\d{2}[/.-](?:\d{4}|\d{2})\b/g;
 
 /**
  * Token con forma de número de documento: '262000663', '26 BAR262023454',
@@ -143,7 +144,19 @@ export const readHeaderDoc = (text: string): HeaderDoc => {
   if (label && label.index !== undefined) {
     const from = label.index + label[0].length;
     const window = plain.slice(from, from + LABEL_WINDOW);
+    // Los trozos de una fecha ("10/2026" dentro de "31/10/2026") tienen forma de
+    // número de documento, y cuando la etiqueta es una cabecera de columna
+    // («FACTURA Nº DOCUMENTO FECHA …») el primer candidato de la ventana es justo
+    // la fecha de la fila de datos. Se descartan los que caen dentro de una
+    // fecha: un número impreso como parte de una fecha no es el documento.
+    const dateSpans = Array.from(window.matchAll(RE_DATE_GLOBAL), m => [
+      m.index ?? 0,
+      (m.index ?? 0) + m[0].length,
+    ] as const);
     for (const token of window.matchAll(RE_DOCNUM_GLOBAL)) {
+      const start = token.index ?? 0;
+      const end = start + token[1].length;
+      if (dateSpans.some(([ds, de]) => ds <= start && end <= de)) continue;
       if (looksLikeDocNumber(token[1])) {
         return { number: normalizeDocNumber(token[1]), page: null, total: null };
       }

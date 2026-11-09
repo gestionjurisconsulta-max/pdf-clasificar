@@ -144,7 +144,16 @@ def read_header_doc(text: str) -> HeaderDoc:
     label = _RE_DOC_LABEL.search(plain)
     if label:
         window = plain[label.end() : label.end() + _LABEL_WINDOW]
+        # Los trozos de una fecha ("10/2026" dentro de "31/10/2026") tienen forma
+        # de número de documento, y cuando la etiqueta es una cabecera de columna
+        # («FACTURA Nº DOCUMENTO FECHA …») el primer candidato de la ventana es
+        # justo la fecha de la fila de datos. Se descartan los que caen dentro de
+        # una fecha: un número impreso como parte de una fecha no es el documento.
+        date_spans = [m.span() for m in _RE_DATE.finditer(window)]
         for token in _RE_DOCNUM.finditer(window):
+            start, end = token.span(1)
+            if any(ds <= start and end <= de for ds, de in date_spans):
+                continue
             if _looks_like_doc_number(token.group(1)):
                 return HeaderDoc(_norm_num(token.group(1)))
 
