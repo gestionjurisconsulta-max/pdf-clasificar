@@ -53,7 +53,7 @@ const App: React.FC = () => {
 
   if (mode === null) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-[#f1f5f9] text-slate-400">
+      <div className="min-h-screen flex items-center justify-center bg-[#f1f5f9] text-slate-500">
         <i className="fas fa-circle-notch fa-spin text-2xl"></i>
       </div>
     );
@@ -65,14 +65,14 @@ const App: React.FC = () => {
         onClick={() => choose('servidor')}
         disabled={apiUp === false}
         title={apiUp === false ? 'El servidor no responde' : 'Varios ficheros, facturas y albaranes, histórico'}
-        className={`px-3 py-2 rounded-lg text-[8px] font-black uppercase tracking-widest transition-all disabled:opacity-30 ${mode === 'servidor' ? 'bg-white shadow-sm text-red-600' : 'text-slate-400 hover:text-slate-600'}`}
+        className={`px-3 py-2 rounded-lg text-[11px] font-semibold uppercase tracking-wide transition-all disabled:opacity-30 ${mode === 'servidor' ? 'bg-white shadow-sm text-brand-600' : 'text-slate-500 hover:text-slate-600'}`}
       >
         <i className="fas fa-server mr-1.5"></i>Servidor
       </button>
       <button
         onClick={() => choose('local')}
         title="Un PDF, con revisión visual página a página"
-        className={`px-3 py-2 rounded-lg text-[8px] font-black uppercase tracking-widest transition-all ${mode === 'local' ? 'bg-white shadow-sm text-red-600' : 'text-slate-400 hover:text-slate-600'}`}
+        className={`px-3 py-2 rounded-lg text-[11px] font-semibold uppercase tracking-wide transition-all ${mode === 'local' ? 'bg-white shadow-sm text-brand-600' : 'text-slate-500 hover:text-slate-600'}`}
       >
         <i className="fas fa-laptop mr-1.5"></i>Local
       </button>

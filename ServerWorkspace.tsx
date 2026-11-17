@@ -221,14 +221,14 @@ const ServerWorkspace: React.FC<ServerWorkspaceProps> = ({ modeSwitch }) => {
     <div className="min-h-screen bg-[#f1f5f9] flex flex-col h-screen overflow-hidden text-slate-900">
       <header className="bg-white border-b px-6 py-3 flex flex-col sm:flex-row justify-between items-center z-50 shadow-sm shrink-0 gap-3">
         <div className="flex items-center gap-4">
-          <div className="w-10 h-10 bg-slate-900 rounded-xl flex items-center justify-center text-white shadow-lg rotate-2">
-            <i className="fas fa-server text-lg"></i>
+          <div className="w-10 h-10 bg-slate-900 rounded-xl flex items-center justify-center text-white shadow-lg">
+            <i className="fas fa-folder-tree text-lg"></i>
           </div>
           <div>
-            <h1 className="text-lg font-black tracking-tighter uppercase leading-none">
-              Pdf<span className="text-red-600">Clasificar</span>
+            <h1 className="text-lg font-semibold tracking-tighter uppercase leading-none">
+              Pdf<span className="text-brand-600">Clasificar</span>
             </h1>
-            <p className="text-[8px] text-slate-400 font-black uppercase tracking-widest mt-0.5">
+            <p className="text-[12px] text-slate-500 font-semibold uppercase tracking-wide mt-0.5">
               v{APP_VERSION} · Servidor
             </p>
           </div>
@@ -237,7 +237,7 @@ const ServerWorkspace: React.FC<ServerWorkspaceProps> = ({ modeSwitch }) => {
           {(clients.length > 0 || batchId !== null) && (
             <button
               onClick={empezarDeNuevo}
-              className="px-4 py-2 bg-slate-50 border rounded-xl text-[9px] font-black uppercase hover:bg-white transition-all"
+              className="px-4 py-2 bg-slate-50 border rounded-xl text-[12px] font-semibold uppercase hover:bg-white transition-all"
             >
               Empezar de nuevo
             </button>
@@ -249,7 +249,7 @@ const ServerWorkspace: React.FC<ServerWorkspaceProps> = ({ modeSwitch }) => {
       {error && (
         <div className="bg-red-50 border-b-2 border-red-200 px-6 py-3 flex items-center gap-3 shrink-0">
           <i className="fas fa-triangle-exclamation text-red-600"></i>
-          <p className="text-[11px] font-bold text-red-700 flex-1">{error}</p>
+          <p className="text-[12px] font-bold text-red-700 flex-1">{error}</p>
           <button onClick={() => setError(null)} className="text-red-400 hover:text-red-700">
             <i className="fas fa-times"></i>
           </button>
@@ -260,9 +260,9 @@ const ServerWorkspace: React.FC<ServerWorkspaceProps> = ({ modeSwitch }) => {
       <div className="px-6 pt-4 shrink-0 flex flex-wrap items-center gap-2">
         {pasos.map((p, i) => (
           <React.Fragment key={p.id}>
-            {i > 0 && <i className="fas fa-chevron-right text-[8px] text-slate-300"></i>}
-            <span className={`px-4 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all ${
-              i === indiceActual ? 'bg-white shadow-md text-red-600'
+            {i > 0 && <i className="fas fa-chevron-right text-[12px] text-slate-300"></i>}
+            <span className={`px-4 py-2 rounded-xl text-[12px] font-semibold uppercase tracking-wide transition-all ${
+              i === indiceActual ? 'bg-white shadow-md text-brand-600'
               : i < indiceActual ? 'text-green-600' : 'text-slate-300'
             }`}>
               {i < indiceActual && <i className="fas fa-check mr-2"></i>}
@@ -275,7 +275,7 @@ const ServerWorkspace: React.FC<ServerWorkspaceProps> = ({ modeSwitch }) => {
       <main className="flex-1 overflow-y-auto p-6 custom-scrollbar">
         <div className="max-w-5xl mx-auto space-y-6">
 
-          <p className="text-[10px] font-bold text-slate-400 bg-white border border-slate-100 rounded-2xl px-5 py-4 leading-relaxed">
+          <p className="text-xs text-slate-500 bg-white border border-slate-100 rounded-2xl px-5 py-4 leading-relaxed">
             <i className="fas fa-circle-info mr-2 text-slate-300"></i>
             Nada se guarda. Lo que subas vive sólo durante este trabajo y se borra
             del servidor en cuanto descargues el ZIP. Si lo dejas a medias, se
@@ -283,18 +283,18 @@ const ServerWorkspace: React.FC<ServerWorkspaceProps> = ({ modeSwitch }) => {
           </p>
 
           {paso === 'terminado' ? (
-            <div className="bg-white p-12 rounded-[2.5rem] shadow-xl border border-slate-100 text-center space-y-5">
+            <div className="bg-white p-12 rounded-3xl shadow-xl border border-slate-100 text-center space-y-5">
               <div className="w-16 h-16 bg-green-50 text-green-500 rounded-2xl flex items-center justify-center text-3xl mx-auto">
                 <i className="fas fa-check-double"></i>
               </div>
-              <h2 className="text-xl font-black uppercase tracking-tighter">Trabajo terminado</h2>
-              <p className="text-[11px] font-bold text-slate-400 leading-relaxed max-w-md mx-auto">
+              <h2 className="text-xl font-semibold uppercase tracking-tighter">Trabajo terminado</h2>
+              <p className="text-sm text-slate-500 leading-relaxed max-w-md mx-auto">
                 El ZIP está en tu carpeta de descargas y el servidor ya no conserva
                 nada: ni los PDF, ni los documentos generados, ni la lista de clientes.
               </p>
               <button
                 onClick={empezarDeNuevo}
-                className="px-8 py-4 bg-slate-900 text-white rounded-2xl font-black uppercase tracking-widest text-[9px] hover:bg-red-600 transition-all shadow-lg"
+                className="px-8 py-4 bg-slate-900 text-white rounded-2xl font-semibold uppercase tracking-wide text-[12px] hover:bg-brand-600 transition-all shadow-lg"
               >
                 Clasificar otro lote
               </button>
@@ -302,20 +302,20 @@ const ServerWorkspace: React.FC<ServerWorkspaceProps> = ({ modeSwitch }) => {
           ) : (
             <>
               {/* --- Paso 1: clientes ------------------------------------ */}
-              <div className={`bg-white p-8 rounded-[2rem] shadow-sm border transition-all ${paso === 'clientes' ? 'border-red-200' : 'border-slate-100'}`}>
+              <div className={`bg-white p-8 rounded-3xl shadow-sm border transition-all ${paso === 'clientes' ? 'border-brand-200' : 'border-slate-100'}`}>
                 <div className="flex flex-wrap justify-between items-baseline gap-2 mb-4">
-                  <h2 className="text-lg font-black uppercase tracking-tighter">1. Clientes</h2>
+                  <h2 className="text-lg font-semibold uppercase tracking-tighter">1. Clientes</h2>
                   {clients.length > 0 && (
-                    <span className="text-[10px] font-black uppercase tracking-widest text-green-700">
+                    <span className="text-[12px] font-semibold uppercase tracking-wide text-green-700">
                       <i className="fas fa-check-circle mr-2"></i>{clients.length} cargados
                     </span>
                   )}
                 </div>
 
                 {batchId === null && (
-                  <label className={`block w-full py-8 border-2 border-dashed rounded-[1.5rem] cursor-pointer text-center transition-all ${importing ? 'opacity-40 pointer-events-none' : 'border-slate-100 hover:bg-indigo-50'}`}>
-                    <i className={`fas ${importing ? 'fa-circle-notch fa-spin' : 'fa-file-excel'} text-2xl text-indigo-400`}></i>
-                    <span className="block mt-3 text-[11px] font-black text-slate-400 uppercase">
+                  <label className={`block w-full py-8 border-2 border-dashed rounded-3xl cursor-pointer text-center transition-all ${importing ? 'opacity-40 pointer-events-none' : 'border-slate-100 hover:bg-brand-50'}`}>
+                    <i className={`fas ${importing ? 'fa-circle-notch fa-spin' : 'fa-file-excel'} text-2xl text-brand-400`}></i>
+                    <span className="block mt-3 text-[12px] font-semibold text-slate-500 uppercase">
                       {importing ? 'Importando...' : clients.length > 0 ? 'Añadir más Excel' : 'Subir uno o varios Excel'}
                     </span>
                     <input type="file" multiple accept=".xlsx,.xlsm,.xls,.csv" onChange={handleImport} className="hidden" />
@@ -327,9 +327,9 @@ const ServerWorkspace: React.FC<ServerWorkspaceProps> = ({ modeSwitch }) => {
                     {importResult.files.map(f => (
                       <div
                         key={f.filename}
-                        className={`p-3 rounded-xl text-[10px] font-bold flex flex-wrap items-center gap-x-4 gap-y-1 ${f.error ? 'bg-red-50 text-red-700' : 'bg-green-50 text-green-700'}`}
+                        className={`p-3 rounded-xl text-[12px] font-bold flex flex-wrap items-center gap-x-4 gap-y-1 ${f.error ? 'bg-red-50 text-red-700' : 'bg-green-50 text-green-700'}`}
                       >
-                        <span className="font-black">{f.filename}</span>
+                        <span className="font-semibold">{f.filename}</span>
                         {f.error ? <span>{f.error}</span> : (
                           <>
                             <span>{f.rows_read} filas</span>
@@ -345,18 +345,18 @@ const ServerWorkspace: React.FC<ServerWorkspaceProps> = ({ modeSwitch }) => {
 
               {/* --- Paso 2: documentos ---------------------------------- */}
               {clients.length > 0 && (
-                <div className={`bg-white p-8 rounded-[2rem] shadow-sm border transition-all ${paso === 'documento' ? 'border-red-200' : 'border-slate-100'}`}>
-                  <h2 className="text-lg font-black uppercase tracking-tighter mb-4">2. Documentos</h2>
+                <div className={`bg-white p-8 rounded-3xl shadow-sm border transition-all ${paso === 'documento' ? 'border-brand-200' : 'border-slate-100'}`}>
+                  <h2 className="text-lg font-semibold uppercase tracking-tighter mb-4">2. Documentos</h2>
                   {batchId === null ? (
-                    <label className={`block w-full py-8 border-2 border-dashed rounded-[1.5rem] cursor-pointer text-center transition-all ${uploading ? 'opacity-40 pointer-events-none' : 'border-slate-100 hover:bg-red-50'}`}>
-                      <i className={`fas ${uploading ? 'fa-circle-notch fa-spin' : 'fa-file-pdf'} text-2xl text-red-400`}></i>
-                      <span className="block mt-3 text-[11px] font-black text-slate-400 uppercase">
+                    <label className={`block w-full py-8 border-2 border-dashed rounded-3xl cursor-pointer text-center transition-all ${uploading ? 'opacity-40 pointer-events-none' : 'border-slate-100 hover:bg-brand-50'}`}>
+                      <i className={`fas ${uploading ? 'fa-circle-notch fa-spin' : 'fa-file-pdf'} text-2xl text-brand-400`}></i>
+                      <span className="block mt-3 text-[12px] font-semibold text-slate-500 uppercase">
                         {uploading ? 'Subiendo...' : 'Subir uno o varios PDF'}
                       </span>
                       <input type="file" multiple accept="application/pdf" onChange={handleUpload} className="hidden" />
                     </label>
                   ) : (
-                    <p className="text-[11px] font-bold text-slate-400">
+                    <p className="text-[12px] font-bold text-slate-500">
                       {detail?.sources.map(s => s.filename).join(' · ') || '...'}
                       <span className="text-slate-300"> · {detail?.pages_total ?? 0} páginas</span>
                     </p>
@@ -366,18 +366,18 @@ const ServerWorkspace: React.FC<ServerWorkspaceProps> = ({ modeSwitch }) => {
 
               {/* --- Procesando ------------------------------------------ */}
               {paso === 'procesando' && (
-                <div className="bg-white p-8 rounded-[2rem] shadow-sm border border-slate-100 space-y-3">
-                  <div className="flex justify-between text-[10px] font-black uppercase tracking-widest text-slate-500">
-                    <span><i className="fas fa-circle-notch fa-spin text-red-600 mr-3"></i>Clasificando...</span>
-                    <span className="text-slate-400">
+                <div className="bg-white p-8 rounded-3xl shadow-sm border border-slate-100 space-y-3">
+                  <div className="flex justify-between text-[12px] font-semibold uppercase tracking-wide text-slate-500">
+                    <span><i className="fas fa-circle-notch fa-spin text-brand-600 mr-3"></i>Clasificando...</span>
+                    <span className="text-slate-500">
                       {detail?.pages_done ?? 0} / {detail?.pages_total ?? 0} páginas
                       {progreso > 0 && <span className="ml-2 text-slate-300">({progreso}%)</span>}
                     </span>
                   </div>
                   <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
-                    <div className="bg-red-600 h-full rounded-full transition-all duration-500" style={{ width: `${progreso}%` }}></div>
+                    <div className="bg-brand-600 h-full rounded-full transition-all duration-500" style={{ width: `${progreso}%` }}></div>
                   </div>
-                  <p className="text-[9px] font-bold text-slate-300 leading-relaxed">
+                  <p className="text-xs text-slate-500 leading-relaxed">
                     {restante
                       ? `Quedan unos ${restante}. `
                       : 'Un PDF escaneado tarda bastante más, porque hay que pasarle OCR página a página. '}
@@ -391,31 +391,31 @@ const ServerWorkspace: React.FC<ServerWorkspaceProps> = ({ modeSwitch }) => {
               {paso === 'revision' && detail && (
                 <>
                   {detail.status === 'fallido' ? (
-                    <div className="bg-red-50 border-2 border-red-200 p-6 rounded-[2rem] space-y-2">
-                      <p className="text-[10px] font-black uppercase tracking-widest text-red-600">El lote ha fallado</p>
-                      <p className="text-[11px] font-bold text-red-700 leading-relaxed">{detail.error}</p>
+                    <div className="bg-red-50 border-2 border-red-200 p-6 rounded-3xl space-y-2">
+                      <p className="text-[12px] font-semibold uppercase tracking-wide text-red-600">El lote ha fallado</p>
+                      <p className="text-[12px] font-bold text-red-700 leading-relaxed">{detail.error}</p>
                       <button
                         onClick={empezarDeNuevo}
-                        className="mt-2 px-6 py-3 bg-red-600 text-white rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-slate-900 transition-all"
+                        className="mt-2 px-6 py-3 bg-red-600 text-white rounded-xl text-[12px] font-semibold uppercase tracking-wide hover:bg-slate-900 transition-all"
                       >
                         Empezar de nuevo
                       </button>
                     </div>
                   ) : (
                     <>
-                      <div className="bg-white p-6 rounded-[2rem] shadow-sm border border-slate-100 space-y-4">
-                        <h2 className="text-lg font-black uppercase tracking-tighter">3. Revisar y descargar</h2>
+                      <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100 space-y-4">
+                        <h2 className="text-lg font-semibold uppercase tracking-tighter">3. Revisar y descargar</h2>
 
                         <div className="flex flex-wrap items-center gap-3">
                           {Object.entries(detail.summary).map(([key, value]) => (
-                            <span key={key} className="text-[9px] font-black uppercase tracking-widest px-3 py-2 rounded-xl bg-slate-50 border border-slate-100 text-slate-600">
+                            <span key={key} className="text-[12px] font-semibold uppercase tracking-wide px-3 py-2 rounded-xl bg-slate-50 border border-slate-100 text-slate-600">
                               {key.replace('_', ' ')}: <span className="text-slate-900">{value}</span>
                             </span>
                           ))}
                         </div>
 
                         {pendientes > 0 && (
-                          <p className="text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-100 rounded-xl p-4 leading-relaxed">
+                          <p className="text-[12px] font-bold text-amber-700 bg-amber-50 border border-amber-100 rounded-xl p-4 leading-relaxed">
                             <i className="fas fa-triangle-exclamation mr-2"></i>
                             Hay {pendientes} documento{pendientes > 1 ? 's' : ''} sin cliente.
                             Si descargas ahora, {pendientes > 1 ? 'irán' : 'irá'} a la carpeta
@@ -427,23 +427,23 @@ const ServerWorkspace: React.FC<ServerWorkspaceProps> = ({ modeSwitch }) => {
                           <a
                             href={batchDownloadUrl(detail.id)}
                             onClick={() => setDescargado(true)}
-                            className="px-8 py-4 bg-slate-900 text-white rounded-2xl font-black uppercase tracking-widest text-[9px] hover:bg-green-600 transition-all shadow-lg flex items-center gap-3"
+                            className="px-8 py-4 bg-slate-900 text-white rounded-2xl font-semibold uppercase tracking-wide text-[12px] hover:bg-green-600 transition-all shadow-lg flex items-center gap-3"
                           >
                             <i className="fas fa-file-zipper text-base"></i> Descargar ZIP y terminar
                           </a>
-                          <p className="text-[9px] font-bold text-slate-400 leading-relaxed flex-1 min-w-[200px]">
+                          <p className="text-xs text-slate-500 leading-relaxed flex-1 min-w-[200px]">
                             Al descargar, el servidor borra todo. Revisa antes lo que haga falta.
                           </p>
                         </div>
                       </div>
 
                       {detail.documents.length > 0 && (
-                        <div className="bg-white p-6 rounded-[2rem] shadow-sm border border-slate-100 space-y-2">
+                        <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100 space-y-2">
                           <div className="flex flex-wrap justify-between items-baseline gap-2 mb-3">
-                            <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-500">
+                            <h3 className="text-[12px] font-semibold uppercase tracking-wide text-slate-500">
                               {detail.documents.length} documentos
                             </h3>
-                            <p className="text-[9px] font-bold text-slate-400">
+                            <p className="text-[12px] font-bold text-slate-500">
                               Pulsa el número de páginas para verlas y corregir el troceado.
                             </p>
                           </div>
@@ -479,7 +479,7 @@ const ServerWorkspace: React.FC<ServerWorkspaceProps> = ({ modeSwitch }) => {
           <div className="relative max-h-full" onClick={e => e.stopPropagation()}>
             <button
               onClick={() => setZoom(null)}
-              className="absolute -top-3 -right-3 w-9 h-9 bg-white rounded-full shadow-xl text-slate-400 hover:text-red-600 z-10"
+              className="absolute -top-3 -right-3 w-9 h-9 bg-white rounded-full shadow-xl text-slate-500 hover:text-brand-600 z-10"
             >
               <i className="fas fa-times"></i>
             </button>

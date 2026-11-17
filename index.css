@@ -3,3 +3,22 @@
 /* Servido desde node_modules en vez de un CDN: la app declara funcionar sin
    conexión externa y un CDN caído dejaba la interfaz entera sin iconos. */
 @import "@fortawesome/fontawesome-free/css/all.min.css";
+
+/* --------------------------------------------------------------------------
+   Tokens de color de la interfaz: un único sitio donde vive la marca.
+   Roles (se usan por su nombre en las clases de Tailwind, p. ej. bg-brand-600):
+     brand → principal: logo, acciones, estados activos, progreso.
+     green → éxito / confirmado.        amber → aviso / pendiente.
+     red   → peligro / error / borrar.  slate → neutros y texto.
+   Para recolorar toda la app, cambia los valores de --color-brand-*.
+   -------------------------------------------------------------------------- */
+@theme {
+  --color-brand-50:  #eef2ff;
+  --color-brand-100: #e0e7ff;
+  --color-brand-200: #c7d2fe;
+  --color-brand-400: #818cf8;
+  --color-brand-500: #6366f1;
+  --color-brand-600: #4f46e5;
+  --color-brand-700: #4338ca;
+  --color-brand-800: #3730a3;
+}
