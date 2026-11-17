@@ -7,7 +7,7 @@ import { analyzeInvoicePage } from './services/geminiService';
 import { canonicalForm, findMatchingCompany } from './services/matchingService';
 import { sanitizeName } from './services/fileNameService';
 import { DEFAULT_CIF_REGEX, DEFAULT_INVOICE_REGEX, extractInvoiceNumber } from './services/invoiceNumberService';
-import { groupByContinuation } from './services/continuationService';
+import { groupByContinuation, groupByContinuationFlags } from './services/continuationService';
 import { readHeaderDoc } from './services/headerDocService';
 import { Company, DocumentType, InvoicePageData, ProcessedInvoice, ProcessingStep, LearningData } from './types';
 import { detectDocumentType } from './services/documentTypeService';
@@ -419,6 +419,10 @@ const LocalWorkspace: React.FC<LocalWorkspaceProps> = ({ modeSwitch }) => {
       // continuaciones no cuesta ninguna extracción extra.
       const sueltas = pages.filter(p => !processedIndices.has(p.index)).sort((a, b) => a.index - b.index);
       const textCache = new Map<number, string>();
+      // En modo IA se cachea el análisis de cada hoja suelta: la pre-pasada lo
+      // usa para agrupar continuaciones y el bucle principal lo reutiliza sin
+      // volver a llamar a Gemini.
+      const aiCache = new Map<number, InvoicePageData>();
 
       if (!useAI && autoContinuation && sueltas.length > 0) {
         addLog(`Leyendo el texto de ${sueltas.length} páginas para detectar facturas de varias hojas...`);
@@ -460,8 +464,50 @@ const LocalWorkspace: React.FC<LocalWorkspaceProps> = ({ modeSwitch }) => {
           : `Ninguna página parece continuación: ${legibles.length} facturas de una hoja.`);
       }
 
-      // El resto (modo IA, detección desactivada, o páginas que no se pudieron
-      // leer) mantiene el comportamiento de una factura por página.
+      // Modo IA: se analiza cada hoja suelta ANTES de armar los bloques para
+      // poder agrupar las continuaciones con la bandera `isContinuation` que
+      // devuelve Gemini. No cuesta llamadas de más: hoy ya se llamaba una vez por
+      // hoja; aquí se llama igual, pero antes, y el bucle principal reutiliza la
+      // caché. Como el motor local, sólo se agrupan las hojas que SÍ se pudieron
+      // analizar: si falla una o se cancela, va por su cuenta.
+      if (useAI && autoContinuation && sueltas.length > 0) {
+        addLog(`Analizando ${sueltas.length} páginas con IA para detectar facturas de varias hojas...`);
+        setProgress({ current: 0, total: sueltas.length });
+
+        for (let i = 0; i < sueltas.length; i++) {
+          if (stopProcessingRef.current) { cancelled = true; break; }
+          const page = sueltas[i];
+          try {
+            const aiImage = await pdfPageToImage(pdfDoc, page.index, { scale: AI_SCALE, mimeType: 'image/png' });
+            aiCache.set(page.index, await analyzeInvoicePage(aiImage));
+          } catch (e) {
+            addLog(`No se ha podido analizar la página ${page.index + 1} con IA: ${errorMessage(e)}`);
+          }
+          setProgress(p => ({ ...p, current: i + 1 }));
+        }
+
+        const analizadas = sueltas.filter(p => aiCache.has(p.index));
+        if (analizadas.length > 0) {
+          const byIndex = new Map(sueltas.map(p => [p.index, p]));
+          const grupos = groupByContinuationFlags(
+            analizadas.map(p => ({ index: p.index, isContinuation: aiCache.get(p.index)!.isContinuation }))
+          );
+
+          let unidas = 0;
+          for (const grupo of grupos) {
+            batches.push(grupo.indices.map(idx => byIndex.get(idx)!));
+            grupo.indices.forEach(idx => processedIndices.add(idx));
+            grupo.notes.forEach(n => { addLog(`>>> ${n}`, true); unidas++; });
+          }
+
+          addLog(unidas > 0
+            ? `${unidas} página(s) unidas automáticamente a la factura anterior (IA): ${grupos.length} facturas a partir de ${analizadas.length} hojas.`
+            : `Ninguna página parece continuación (IA): ${analizadas.length} facturas de una hoja.`);
+        }
+      }
+
+      // El resto (detección desactivada, o páginas que no se pudieron analizar)
+      // mantiene el comportamiento de una factura por página.
       pages.filter(p => !processedIndices.has(p.index)).forEach(p => { batches.push([p]); processedIndices.add(p.index); });
 
       batches.sort((a, b) => a[0].index - b[0].index);
@@ -493,10 +539,15 @@ const LocalWorkspace: React.FC<LocalWorkspaceProps> = ({ modeSwitch }) => {
 
         try {
           if (useAI) {
-            // Se renderiza una imagen dedicada en vez de reutilizar la
-            // miniatura, que ahora es pequeña y perdería legibilidad.
-            const aiImage = await pdfPageToImage(pdfDoc, firstPage.index, { scale: AI_SCALE, mimeType: 'image/png' });
-            const aiData = await analyzeInvoicePage(aiImage);
+            // Si la pre-pasada ya analizó esta hoja (el caso normal de las hojas
+            // sueltas), se reutiliza; sólo se llama a Gemini para las que no
+            // pasaron por ella (p. ej. un grupo manual). Se renderiza una imagen
+            // dedicada en vez de la miniatura, que es pequeña y perdería nitidez.
+            let aiData = aiCache.get(firstPage.index);
+            if (!aiData) {
+              const aiImage = await pdfPageToImage(pdfDoc, firstPage.index, { scale: AI_SCALE, mimeType: 'image/png' });
+              aiData = await analyzeInvoicePage(aiImage);
+            }
             matchedCompany = companies.find(c => canonicalForm(c.cif) === canonicalForm(aiData.cif)) || null;
             invoiceNumber = aiData.invoiceNumber;
             addLog(`>>> AI Detectó CIF: ${aiData.cif} | Factura: ${aiData.invoiceNumber}`, true);
@@ -1053,17 +1104,16 @@ const LocalWorkspace: React.FC<LocalWorkspaceProps> = ({ modeSwitch }) => {
                 <h3 className="text-[12px] font-semibold text-slate-500 uppercase tracking-wide px-1">Facturas de varias hojas</h3>
                 <button
                   onClick={() => setAutoContinuation(v => !v)}
-                  disabled={useAI}
-                  className={`w-full p-4 rounded-2xl border-2 flex items-center gap-3 text-left transition-all disabled:opacity-30 ${autoContinuation && !useAI ? 'bg-green-50 border-green-200 text-green-700' : 'bg-white border-slate-100 text-slate-500'}`}
+                  className={`w-full p-4 rounded-2xl border-2 flex items-center gap-3 text-left transition-all ${autoContinuation ? 'bg-green-50 border-green-200 text-green-700' : 'bg-white border-slate-100 text-slate-500'}`}
                 >
-                  <i className={`fas ${autoContinuation && !useAI ? 'fa-toggle-on text-green-600' : 'fa-toggle-off'} text-lg`}></i>
+                  <i className={`fas ${autoContinuation ? 'fa-toggle-on text-green-600' : 'fa-toggle-off'} text-lg`}></i>
                   <span className="text-[12px] font-semibold uppercase leading-tight">
                     {autoContinuation ? 'Unir continuaciones automáticamente' : 'Una factura por hoja'}
                   </span>
                 </button>
                 <p className="text-[12px] text-slate-500 leading-relaxed px-1">
                   {useAI
-                    ? 'No disponible con el motor AI GEMINI: la detección usa el texto que extrae el motor local.'
+                    ? 'Con el motor IA, une a la factura anterior las hojas que Gemini marca como continuación. El log detallado explica cada unión.'
                     : 'Une a la factura anterior las hojas que no traen ni número de factura ni un CIF nuevo. El log detallado explica cada unión.'}
                 </p>
               </div>

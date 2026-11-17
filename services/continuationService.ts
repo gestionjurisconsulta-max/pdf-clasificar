@@ -262,3 +262,39 @@ export const groupByContinuation = (
     notes
   }));
 };
+
+export interface PageFlag {
+  index: number;
+  /** La IA marcó esta hoja como continuación de la página anterior. */
+  isContinuation: boolean;
+}
+
+/**
+ * Agrupa las hojas usando la bandera `isContinuation` que devuelve el motor IA,
+ * en vez del texto. Igual que `groupByContinuation`, sólo une páginas
+ * FÍSICAMENTE CONTIGUAS y nunca trata la primera hoja como continuación: no hay
+ * factura anterior a la que pueda pertenecer.
+ */
+export const groupByContinuationFlags = (pages: PageFlag[]): ContinuationGroup[] => {
+  const ordered = [...pages].sort((a, b) => a.index - b.index);
+  const groups: ContinuationGroup[] = [];
+  let previousIndex: number | null = null;
+
+  for (const page of ordered) {
+    const open = groups.length > 0 ? groups[groups.length - 1] : null;
+    const adjacent = previousIndex !== null && page.index === previousIndex + 1;
+
+    if (open && adjacent && page.isContinuation) {
+      open.indices.push(page.index);
+      open.notes.push(
+        `Pág. ${page.index + 1} se une a la factura de la pág. ${open.indices[0] + 1}: la IA la marcó como continuación.`
+      );
+    } else {
+      groups.push({ indices: [page.index], notes: [] });
+    }
+
+    previousIndex = page.index;
+  }
+
+  return groups;
+};

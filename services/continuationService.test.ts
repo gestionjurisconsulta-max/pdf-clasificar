@@ -1,8 +1,33 @@
 import { describe, expect, it } from 'vitest';
-import { groupByContinuation, isContinuation, readPageIdentity } from './continuationService';
+import { groupByContinuation, groupByContinuationFlags, isContinuation, readPageIdentity } from './continuationService';
 
 const cabecera = (cliente: string, numero: string) =>
   `SUMINISTROS GARCIA SL CIF: B11111111 FACTURA Factura Nº ${numero} CLIENTE ${cliente}`;
+
+describe('groupByContinuationFlags', () => {
+  it('une a la factura anterior las hojas marcadas como continuación', () => {
+    const grupos = groupByContinuationFlags([
+      { index: 0, isContinuation: false },
+      { index: 1, isContinuation: true },
+      { index: 2, isContinuation: false },
+    ]);
+    expect(grupos.map(g => g.indices)).toEqual([[0, 1], [2]]);
+  });
+
+  it('nunca trata la primera hoja como continuación', () => {
+    const grupos = groupByContinuationFlags([{ index: 0, isContinuation: true }]);
+    expect(grupos.map(g => g.indices)).toEqual([[0]]);
+  });
+
+  it('no salta huecos: sólo une páginas contiguas', () => {
+    // Falta la página 1 (borrada o ya en un grupo manual): la 2 no se une a la 0.
+    const grupos = groupByContinuationFlags([
+      { index: 0, isContinuation: false },
+      { index: 2, isContinuation: true },
+    ]);
+    expect(grupos.map(g => g.indices)).toEqual([[0], [2]]);
+  });
+});
 
 describe('readPageIdentity', () => {
   it('lee el número, los CIF y el marcador de página', () => {
