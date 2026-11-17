@@ -90,7 +90,7 @@ El resultado se descarga como ZIP o, en navegadores con File System Access API
 | | OCR LOCAL (por defecto) | AI GEMINI |
 |---|---|---|
 | Dónde se procesa | En tu navegador | Se envía la imagen a Google |
-| Qué busca | Cualquier CIF de tu lista en el texto de la página | El CIF del emisor de la factura |
+| Qué busca | Cualquier CIF de tu lista en el texto de la página | El CIF del cliente/destinatario de la factura |
 | Requiere red | Sólo para descargar el motor de OCR de páginas escaneadas | Sí |
 | Requiere API key | No | Sí |
 
@@ -152,8 +152,6 @@ tú agrupes no pasa por la detección automática.
   vive dentro del servidor de Vite (ver `geminiProxyPlugin` en
   [vite.config.ts](vite.config.ts)), así que `npm run build` genera un sitio
   estático sin ese endpoint. Para desplegarlo hace falta una función serverless.
-- **El modo IA busca el CIF del emisor**, pero la base de datos es de clientes
-  receptores, así que en la mayoría de facturas no encontrará coincidencia.
 - **En modo IA no hay detección de continuaciones**, porque se apoya en el texto
   que extrae el motor local. Con IA, cada página es una factura salvo que la
   agrupes a mano. El campo `isContinuation` que devuelve Gemini no se usa.

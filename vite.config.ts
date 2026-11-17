@@ -130,9 +130,9 @@ function geminiProxyPlugin(apiKey: string): Plugin {
         model: 'gemini-3-flash-preview',
         contents: {
           parts: [
-            { inlineData: { mimeType: 'image/jpeg', data: base64Image } },
+            { inlineData: { mimeType: 'image/png', data: base64Image } },
             {
-              text: "Analiza esta página de factura y extrae el número de factura, el CIF del emisor de la factura y determina si esta página es la continuación de la página anterior (por ejemplo, si no tiene cabecera o si indica 'Página 2')."
+              text: "Analiza esta página de factura y extrae: el número de factura; el CIF/NIF del CLIENTE o DESTINATARIO, es decir la empresa que RECIBE la factura (NO el del emisor que la expide); y si esta página es la continuación de la anterior (por ejemplo, si no tiene cabecera o si indica 'Página 2')."
             }
           ]
         },
@@ -142,7 +142,7 @@ function geminiProxyPlugin(apiKey: string): Plugin {
             type: Type.OBJECT,
             properties: {
               invoiceNumber: { type: Type.STRING, description: 'El número identificador de la factura. Déjalo vacío si no se encuentra.' },
-              cif: { type: Type.STRING, description: 'El CIF o NIF de la empresa que emite la factura (ej: B12345678).' },
+              cif: { type: Type.STRING, description: 'El CIF o NIF del CLIENTE/DESTINATARIO de la factura, es decir la empresa que la RECIBE, no la que la emite (ej: B12345678). Déjalo vacío si no se encuentra.' },
               isContinuation: { type: Type.BOOLEAN, description: 'Verdadero si es una página de continuación de la misma factura, falso si es el inicio de una nueva factura.' }
             },
             required: ['invoiceNumber', 'cif', 'isContinuation']
