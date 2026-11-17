@@ -27,6 +27,13 @@ _CONTINUATION_WORDS = re.compile(
 BLANK_THRESHOLD = 12
 
 
+def _strong_id(value: str) -> bool:
+    """Un identificador (número de factura o de cabecera) sólo vale para unir
+    dos hojas si tiene cuerpo suficiente: así un resto de OCR como 'A6' no
+    fusiona dos documentos que no tienen nada que ver."""
+    return len(re.sub(r"[-/\s]", "", value or "")) >= 4
+
+
 @dataclass
 class PageIdentity:
     number: str = ""
@@ -103,6 +110,21 @@ def is_continuation(page: PageIdentity, current: PageIdentity | None) -> Verdict
     ):
         return Verdict(False, f"cambia el tipo de documento a {page.doc_type.value}")
 
+    # La identidad por número o cabecera va ANTES que cualquier corte por
+    # marcador de página: una hoja que repite el número del documento en curso
+    # es continuación aunque se declare "pág. 1" o aunque el documento anterior
+    # pareciera ya completo. Es lo que evita partir una factura cuyas hojas
+    # vienen en orden invertido (la última hoja escaneada primero), sin dejar de
+    # separar dos documentos distintos, que nunca comparten número.
+    if page.number and page.number == current.number and _strong_id(page.number):
+        return Verdict(True, f"repite el número {page.number}")
+    if (
+        page.header_number
+        and page.header_number == current.header_number
+        and _strong_id(page.header_number)
+    ):
+        return Verdict(True, f"repite el nº de cabecera {page.header_number}")
+
     # El documento anterior declaró cuántas hojas tenía y ya las tiene todas
     # ("Pág. 1 de 1", "Pág. 3 de 3"). Nada que venga después le pertenece.
     # Es la regla que protege de un OCR malo: se apoya en la hoja que SÍ se leyó
@@ -127,19 +149,11 @@ def is_continuation(page: PageIdentity, current: PageIdentity | None) -> Verdict
     if page.is_blank:
         return Verdict(True, "no tiene texto legible")
 
-    # Repetir el número del documento en curso es la señal de continuación más
-    # fuerte que hay, y va antes que cualquier corte: una hoja que reimprime la
-    # cabecera de su factura seguiría siendo la misma factura.
-    if page.number and page.number == current.number:
-        return Verdict(True, f"repite el número {page.number}")
-
-    # Número de la línea de cabecera. Que la página tenga uno significa que ha
-    # impreso una cabecera de documento: si no es la del documento en curso,
-    # abre uno nuevo. Es la regla genérica, la que funciona con un proveedor
+    # Número de la línea de cabecera. La cabecera repetida ya se resolvió arriba
+    # (misma identidad); si la página imprime una cabecera y es OTRA, abre un
+    # documento nuevo. Es la regla genérica, la que funciona con un proveedor
     # que no se haya visto nunca.
     if page.header_number:
-        if page.header_number == current.header_number:
-            return Verdict(True, f"repite el nº de cabecera {page.header_number}")
         return Verdict(False, f"su cabecera abre otro documento (nº {page.header_number})")
 
     if page.number:
@@ -188,9 +202,13 @@ def group_by_continuation(
     groups: list[Group] = []
     identities: list[PageIdentity] = []
     previous_index: int | None = None
+    # Marcador "Pág. X de Y" de cada página, para reordenar al final las hojas
+    # de los documentos que vinieron escaneados en orden invertido.
+    page_markers: dict[int, int | None] = {}
 
     for page in ordered:
         identity = read_page_identity(page.text, invoice_pattern, cif_pattern)
+        page_markers[page.index] = identity.page_marker
         adjacent = previous_index is not None and page.index == previous_index + 1
         current = identities[-1] if identities else None
 
@@ -241,5 +259,19 @@ def group_by_continuation(
             identities.append(identity)
 
         previous_index = page.index
+
+    # Reordena las hojas de cada documento por su "Pág. X de Y" cuando forman
+    # una secuencia completa 1..N. Algunos escaneos traen la última hoja primero
+    # (la factura sale como 3, 1, 2); sin esto, el PDF de salida quedaría con las
+    # páginas desordenadas. Si los marcadores se repiten (original y copia) o
+    # falta alguno, no se toca el orden de origen.
+    for group in groups:
+        if len(group.indices) < 2:
+            continue
+        marks = [page_markers.get(i) for i in group.indices]
+        if all(m is not None for m in marks) and sorted(marks) == list(
+            range(1, len(marks) + 1)
+        ):
+            group.indices = [idx for _, idx in sorted(zip(marks, group.indices))]
 
     return groups

@@ -239,3 +239,56 @@ describe('facturas que no escriben la palabra "factura"', () => {
     expect(grupos[0].notes[0]).toContain('se une');
   });
 });
+
+/**
+ * Escaneos que traen las hojas de cada factura en orden invertido (la última
+ * hoja primero): «Pág. 2 de 2» llega antes que «Pág. 1 de 2». Sin reconocer que
+ * repiten el número, la hoja que se declara nº 1 abría un documento nuevo y la
+ * factura quedaba partida en dos.
+ */
+describe('facturas con las hojas en orden invertido', () => {
+  const facturaPag = (numero: string, pag: number, total: number) =>
+    `SUMINISTROS GARCIA SL CIF: B11111111 FACTURA Factura Nº ${numero} ` +
+    `CLIENTE ACEROS CIF: A87654321 Página ${pag} de ${total}`;
+
+  it('isContinuation: una hoja que repite el número continúa aunque se declare "nº 1"', () => {
+    const actual = readPageIdentity(facturaPag('F-2026-0042', 2, 2));
+    const v = isContinuation(readPageIdentity(facturaPag('F-2026-0042', 1, 2)), actual);
+    expect(v.continuation).toBe(true);
+    expect(v.reason).toContain('repite el número');
+  });
+
+  it('une una factura de dos hojas escaneadas 2,1 y las deja en orden 1,2', () => {
+    const grupos = groupByContinuation([
+      { index: 0, text: facturaPag('M6-001766', 2, 2) },
+      { index: 1, text: facturaPag('M6-001766', 1, 2) }
+    ]);
+    expect(grupos.map(g => g.indices)).toEqual([[1, 0]]);
+  });
+
+  it('une una factura de tres hojas escaneadas 3,1,2 y las deja en orden 1,2,3', () => {
+    const grupos = groupByContinuation([
+      { index: 0, text: facturaPag('M6-001829', 3, 3) },
+      { index: 1, text: facturaPag('M6-001829', 1, 3) },
+      { index: 2, text: facturaPag('M6-001829', 2, 3) }
+    ]);
+    expect(grupos.map(g => g.indices)).toEqual([[1, 2, 0]]);
+  });
+
+  it('el original y su copia (mismo número, ambos "1 de 1") caen en un solo documento', () => {
+    const grupos = groupByContinuation([
+      { index: 0, text: facturaPag('A6-006163', 1, 1) },
+      { index: 1, text: facturaPag('A6-006163', 1, 1) }
+    ]);
+    // Marcadores repetidos: se fusionan pero no se reordena el orden de origen.
+    expect(grupos.map(g => g.indices)).toEqual([[0, 1]]);
+  });
+
+  it('dos facturas distintas con número propio no se fusionan por ir seguidas', () => {
+    const grupos = groupByContinuation([
+      { index: 0, text: facturaPag('M6-001766', 1, 1) },
+      { index: 1, text: facturaPag('M6-001767', 1, 1) }
+    ]);
+    expect(grupos.map(g => g.indices)).toEqual([[0], [1]]);
+  });
+});

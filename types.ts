@@ -22,10 +22,15 @@ export interface LearningData {
   };
 }
 
+/** Mismos valores que el enum `DocumentType` del backend. */
+export type DocumentType = 'factura' | 'albaran' | 'desconocido';
+
 export interface ProcessedInvoice {
   invoiceNumber: string;
   companyName: string;
   cif: string;
+  /** Tipo de documento, para separar facturas de albaranes en carpetas. */
+  docType: DocumentType;
   pages: { index: number; rotation: number }[];
 }
 

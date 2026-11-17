@@ -9,11 +9,35 @@ import { sanitizeName } from './services/fileNameService';
 import { DEFAULT_CIF_REGEX, DEFAULT_INVOICE_REGEX, extractInvoiceNumber } from './services/invoiceNumberService';
 import { groupByContinuation } from './services/continuationService';
 import { readHeaderDoc } from './services/headerDocService';
-import { Company, InvoicePageData, ProcessedInvoice, ProcessingStep, LearningData } from './types';
+import { Company, DocumentType, InvoicePageData, ProcessedInvoice, ProcessingStep, LearningData } from './types';
+import { detectDocumentType } from './services/documentTypeService';
 import JSZip from 'jszip';
 import { APP_VERSION } from './constants';
 
 const PENDING_FOLDER = "Pendiente de asignar";
+
+/** Carpeta raíz según el tipo: los albaranes van a su propia rama para que no se
+ * mezclen con la facturación (mismo criterio que el backend). */
+const baseFolderFor = (docType: DocumentType): string =>
+  docType === 'albaran' ? 'Albaranes' : 'Facturas';
+
+/** Etiqueta de tipo para el nombre del fichero: «Alb» para albaranes, «Fact»
+ * para facturas (y para lo no clasificado, que va con las facturas). */
+const typeTagFor = (docType: DocumentType): string =>
+  docType === 'albaran' ? 'Alb' : 'Fact';
+
+/** Obtiene —creando los tramos que falten— un directorio anidado, p. ej.
+ * ['Facturas', 'ACME SL']. */
+const getNestedDir = async (
+  root: FileSystemDirectoryHandle,
+  parts: string[]
+): Promise<FileSystemDirectoryHandle> => {
+  let dir = root;
+  for (const part of parts) {
+    dir = await dir.getDirectoryHandle(part, { create: true });
+  }
+  return dir;
+};
 
 // Las miniaturas se guardan como data URL en el estado de React: a escala 1.5 y
 // en PNG, un PDF de varios cientos de páginas se comía cientos de MB y tumbaba
@@ -459,6 +483,7 @@ const LocalWorkspace: React.FC<LocalWorkspaceProps> = ({ modeSwitch }) => {
         const firstPage = batch[0];
         let matchedCompany: Company | null = null;
         let invoiceNumber = "";
+        let docType: DocumentType = "desconocido";
         let matchInfo = "BUSCANDO...";
         let ambiguousInfo = "";
 
@@ -496,6 +521,12 @@ const LocalWorkspace: React.FC<LocalWorkspaceProps> = ({ modeSwitch }) => {
             // estas facturas se guardaban todas como "S-N".
             invoiceNumber = extractInvoiceNumber(text, learning.patterns.invoiceRegex)
               || readHeaderDoc(text).number;
+
+            // El tipo decide a qué rama va el PDF: Facturas/ o Albaranes/. Se lee
+            // de la cabecera de la primera hoja del bloque.
+            const tipo = detectDocumentType(text);
+            docType = tipo.docType;
+            addLog(`>>> TIPO: ${docType} (${tipo.reason})`, true);
           }
         } catch (e) { addLog(`Error en análisis: ${errorMessage(e)}`); }
 
@@ -524,6 +555,7 @@ const LocalWorkspace: React.FC<LocalWorkspaceProps> = ({ modeSwitch }) => {
           invoiceNumber: finalInvNum,
           companyName,
           cif: matchedCompany?.cif || "",
+          docType,
           pages: batch.map(p => ({ index: p.index, rotation: p.rotation || 0 }))
         });
         setProgress(p => ({ ...p, current: i + 1 }));
@@ -538,31 +570,27 @@ const LocalWorkspace: React.FC<LocalWorkspaceProps> = ({ modeSwitch }) => {
 
       const zip = dirHandle ? null : new JSZip();
 
-      for (const comp of companies) {
-        const fn = sanitizeName(comp.name);
-        if (dirHandle) await dirHandle.getDirectoryHandle(fn, { create: true });
-        else zip?.folder(fn);
-      }
-      if (dirHandle) await dirHandle.getDirectoryHandle(PENDING_FOLDER, { create: true });
-      else zip?.folder(PENDING_FOLDER);
-
       // El PDF de origen se parsea UNA sola vez para todas las facturas.
       const sourcePdf = await loadSourcePdf(pdfBuffer);
 
       for (const inv of results) {
         const bytes = await createMergedPdf(sourcePdf, inv.pages);
+        // Los albaranes van a su propia rama; las facturas (y lo no clasificado)
+        // a la suya. Dentro, una carpeta por cliente. Las carpetas se crean a
+        // demanda: así no quedan carpetas de cliente vacías.
+        const base = baseFolderFor(inv.docType);
         const folderName = sanitizeName(inv.companyName);
         const safeInv = sanitizeName(inv.invoiceNumber);
-        const fileName = `PAG_${String(inv.pages[0].index + 1).padStart(3, '0')}_Fact_${safeInv}.pdf`;
+        const fileName = `PAG_${String(inv.pages[0].index + 1).padStart(3, '0')}_${typeTagFor(inv.docType)}_${safeInv}.pdf`;
 
         if (dirHandle) {
-          const folder = await dirHandle.getDirectoryHandle(folderName, { create: true });
+          const folder = await getNestedDir(dirHandle, [base, folderName]);
           const file = await folder.getFileHandle(fileName, { create: true });
           const writer = await file.createWritable();
           await writer.write(bytes);
           await writer.close();
         } else {
-          zip?.folder(folderName)?.file(fileName, bytes);
+          zip?.folder(base)?.folder(folderName)?.file(fileName, bytes);
         }
       }
 

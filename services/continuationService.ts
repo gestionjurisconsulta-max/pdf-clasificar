@@ -84,12 +84,33 @@ export interface ContinuationVerdict {
 }
 
 /**
+ * Un identificador (número de factura o de cabecera) sólo vale para unir dos
+ * hojas si tiene cuerpo suficiente: así un resto de OCR como «A6» no fusiona
+ * dos documentos que no tienen nada que ver.
+ */
+const strongId = (value: string): boolean =>
+  (value ?? '').replace(/[-/\s]/g, '').length >= 4;
+
+/**
  * ¿`page` continúa la factura cuya identidad acumulada es `current`?
  * `current` acumula los CIF de todas las páginas que ya lleva la factura.
  */
 export const isContinuation = (page: PageIdentity, current: PageIdentity | null): ContinuationVerdict => {
   if (!current) {
     return { continuation: false, reason: 'es la primera página del lote' };
+  }
+
+  // La identidad por número o cabecera va ANTES que cualquier corte por marcador
+  // de página: una hoja que repite el número del documento en curso es
+  // continuación aunque se declare «pág. 1» o aunque el documento anterior
+  // pareciera ya completo. Evita partir una factura cuyas hojas vienen en orden
+  // invertido (la última hoja escaneada primero), sin dejar de separar dos
+  // documentos distintos, que nunca comparten número.
+  if (page.invoiceNumber && page.invoiceNumber === current.invoiceNumber && strongId(page.invoiceNumber)) {
+    return { continuation: true, reason: `repite el número de factura ${page.invoiceNumber}` };
+  }
+  if (page.headerNumber && page.headerNumber === current.headerNumber && strongId(page.headerNumber)) {
+    return { continuation: true, reason: `repite el nº de cabecera ${page.headerNumber}` };
   }
 
   // El documento anterior declaró cuántas hojas tenía y ya las tiene todas
@@ -120,21 +141,12 @@ export const isContinuation = (page: PageIdentity, current: PageIdentity | null)
     return { continuation: true, reason: 'no tiene texto legible' };
   }
 
-  // Repetir el número del documento en curso es la señal de continuación más
-  // fuerte que hay, y va antes que cualquier corte: una hoja que reimprime la
-  // cabecera de su factura sigue siendo la misma factura.
-  if (page.invoiceNumber && page.invoiceNumber === current.invoiceNumber) {
-    return { continuation: true, reason: `repite el número de factura ${page.invoiceNumber}` };
-  }
-
-  // Número de la línea de cabecera. Que la página tenga uno significa que ha
-  // impreso una cabecera de documento: si no es la del documento en curso, abre
-  // uno nuevo. Es la regla genérica, la que funciona con un proveedor que no se
-  // haya visto nunca.
+  // Número de la línea de cabecera. La cabecera repetida ya se resolvió arriba
+  // (misma identidad); si la página imprime una cabecera y es OTRA, abre un
+  // documento nuevo. Es la regla genérica, la que funciona con un proveedor que
+  // no se haya visto nunca.
   if (page.headerNumber) {
-    return page.headerNumber === current.headerNumber
-      ? { continuation: true, reason: `repite el nº de cabecera ${page.headerNumber}` }
-      : { continuation: false, reason: `su cabecera abre otro documento (nº ${page.headerNumber})` };
+    return { continuation: false, reason: `su cabecera abre otro documento (nº ${page.headerNumber})` };
   }
 
   if (page.invoiceNumber) {
@@ -175,6 +187,26 @@ export interface ContinuationGroup {
 }
 
 /**
+ * Reordena las hojas de un documento por su «Pág. X de Y» cuando forman una
+ * secuencia completa 1..N. Algunos escaneos traen la última hoja primero (la
+ * factura sale como 3, 1, 2); sin esto el PDF de salida quedaría desordenado.
+ * Si los marcadores se repiten (original y copia) o falta alguno, se respeta el
+ * orden de origen.
+ */
+const reorderByMarker = (indices: number[], markers: Map<number, number | null>): number[] => {
+  if (indices.length < 2) return indices;
+  const marks = indices.map(i => markers.get(i) ?? null);
+  if (marks.some(m => m === null)) return indices;
+  const nums = marks as number[];
+  const esPermutacion = [...nums].sort((a, b) => a - b).every((m, k) => m === k + 1);
+  if (!esPermutacion) return indices;
+  return indices
+    .map((idx, k) => ({ idx, mark: nums[k] }))
+    .sort((a, b) => a.mark - b.mark)
+    .map(x => x.idx);
+};
+
+/**
  * Agrupa las páginas en facturas. Sólo une páginas FÍSICAMENTE CONTIGUAS: si
  * el usuario ha borrado una página intermedia, o hay un hueco porque esa página
  * ya está en un grupo manual, no se salta el hueco.
@@ -191,9 +223,13 @@ export const groupByContinuation = (
   // un CIF que apareció por primera vez en la hoja 2.
   const building: (ContinuationGroup & { identity: PageIdentity })[] = [];
   let previousIndex: number | null = null;
+  // Marcador «Pág. X de Y» de cada página, para reordenar al final las hojas de
+  // los documentos que vinieron escaneados en orden invertido.
+  const pageMarkers = new Map<number, number | null>();
 
   for (const page of ordered) {
     const identity = readPageIdentity(page.text, invoicePattern, cifPattern);
+    pageMarkers.set(page.index, identity.pageMarker);
     const open = building.length > 0 ? building[building.length - 1] : null;
     const adjacent = previousIndex !== null && page.index === previousIndex + 1;
 
@@ -221,5 +257,8 @@ export const groupByContinuation = (
     previousIndex = page.index;
   }
 
-  return building.map(({ indices, notes }) => ({ indices, notes }));
+  return building.map(({ indices, notes }) => ({
+    indices: reorderByMarker(indices, pageMarkers),
+    notes
+  }));
 };

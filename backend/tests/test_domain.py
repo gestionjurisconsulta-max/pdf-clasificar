@@ -286,3 +286,44 @@ ACEROS CIF: B12345678"""
             PageText(1, self.pagina("262000663", pag="2/2")),
         ])
         assert "se une" in grupos[0].notes[0]
+
+
+class TestOrdenInvertido:
+    """Escaneos que traen las hojas de cada factura en orden invertido (la última
+    hoja primero): "Pág. 2 de 2" llega antes que "Pág. 1 de 2". Sin reconocer que
+    repiten el número, la hoja que se declara nº 1 abría un documento nuevo y la
+    factura quedaba partida en dos."""
+
+    def pagina(self, numero, pag, total):
+        return CABECERA.format(n=numero, c="ACEROS CIF: A87654321") + f" Pagina {pag} de {total}"
+
+    def test_une_dos_hojas_escaneadas_2_1_y_las_deja_en_orden(self):
+        grupos = group_by_continuation([
+            PageText(0, self.pagina("M6-001766", 2, 2)),
+            PageText(1, self.pagina("M6-001766", 1, 2)),
+        ])
+        assert [g.indices for g in grupos] == [[1, 0]]
+
+    def test_une_tres_hojas_escaneadas_3_1_2_y_las_deja_en_orden(self):
+        grupos = group_by_continuation([
+            PageText(0, self.pagina("M6-001829", 3, 3)),
+            PageText(1, self.pagina("M6-001829", 1, 3)),
+            PageText(2, self.pagina("M6-001829", 2, 3)),
+        ])
+        assert [g.indices for g in grupos] == [[1, 2, 0]]
+
+    def test_el_original_y_su_copia_caen_en_un_solo_documento(self):
+        # Mismo número, ambos "1 de 1": se fusionan y, al repetirse el marcador,
+        # se respeta el orden de origen.
+        grupos = group_by_continuation([
+            PageText(0, self.pagina("M6-001935", 1, 1)),
+            PageText(1, self.pagina("M6-001935", 1, 1)),
+        ])
+        assert [g.indices for g in grupos] == [[0, 1]]
+
+    def test_dos_facturas_distintas_con_numero_propio_no_se_fusionan(self):
+        grupos = group_by_continuation([
+            PageText(0, self.pagina("M6-001766", 1, 1)),
+            PageText(1, self.pagina("M6-001767", 1, 1)),
+        ])
+        assert [g.indices for g in grupos] == [[0], [1]]
